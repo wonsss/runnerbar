@@ -33,6 +33,11 @@ open .build/RunnerBar.app
 
 ## Controls
 
+- Open a live dashboard for all configured repository runners.
+- See current queued/in-progress GitHub Actions requests per runner.
+- Cancel active workflow runs from the dashboard.
+- See recent local runner service events from the runner log.
+- See current AC sleep policy in the dashboard.
 - Register a new GitHub repository runner from the menu bar app.
 - Add repository runners from the menu bar app.
 - Start, stop, and restart each configured runner service.

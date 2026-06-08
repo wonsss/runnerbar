@@ -31,6 +31,73 @@ struct GitHubRunnerLabel: Decodable, Sendable {
     var name: String
 }
 
+struct GitHubRunsResponse: Decodable, Sendable {
+    var workflowRuns: [GitHubRun]
+
+    enum CodingKeys: String, CodingKey {
+        case workflowRuns = "workflow_runs"
+    }
+}
+
+struct GitHubRun: Decodable, Sendable {
+    var id: Int64
+    var name: String?
+    var displayTitle: String?
+    var status: String
+    var conclusion: String?
+    var htmlURL: String
+    var createdAt: String?
+    var updatedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case displayTitle = "display_title"
+        case status
+        case conclusion
+        case htmlURL = "html_url"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+}
+
+struct GitHubJobsResponse: Decodable, Sendable {
+    var jobs: [GitHubJob]
+}
+
+struct GitHubJob: Decodable, Sendable {
+    var id: Int64
+    var runID: Int64?
+    var name: String
+    var status: String
+    var conclusion: String?
+    var runnerName: String?
+    var htmlURL: String?
+    var startedAt: String?
+    var completedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case runID = "run_id"
+        case name
+        case status
+        case conclusion
+        case runnerName = "runner_name"
+        case htmlURL = "html_url"
+        case startedAt = "started_at"
+        case completedAt = "completed_at"
+    }
+}
+
+struct RunnerRunActivity: Sendable {
+    var runID: Int64
+    var runName: String
+    var jobName: String
+    var status: String
+    var runnerName: String?
+    var htmlURL: String
+}
+
 enum ServiceState: String, Sendable {
     case started = "Started"
     case stopped = "Stopped"
@@ -45,6 +112,8 @@ struct RunnerSnapshot: Sendable {
     var busy: Bool?
     var labels: [String]
     var error: String?
+    var currentRuns: [RunnerRunActivity]
+    var recentEvents: [String]
 
     var isOnline: Bool {
         serviceState == .started && githubStatus == "online"
@@ -96,6 +165,22 @@ final class RunnerFormController: NSObject {
         NSApp.stopModal()
         window?.close()
     }
+}
+
+final class RunActionRef: NSObject {
+    let runnerID: String
+    let runID: Int64
+    let url: String
+
+    init(runnerID: String, runID: Int64, url: String) {
+        self.runnerID = runnerID
+        self.runID = runID
+        self.url = url
+    }
+}
+
+final class RunActionButton: NSButton {
+    var actionRef: RunActionRef?
 }
 
 enum Shell {
@@ -193,7 +278,9 @@ final class RunnerMonitor: @unchecked Sendable {
                 githubStatus: github.runner?.status,
                 busy: github.runner?.busy,
                 labels: github.runner?.labels.map(\.name) ?? runner.labels,
-                error: error
+                error: error,
+                currentRuns: currentRuns(for: runner),
+                recentEvents: recentEvents(for: runner)
             )
         }
 
@@ -211,6 +298,10 @@ final class RunnerMonitor: @unchecked Sendable {
     func restart(_ runner: RunnerConfig) -> ShellResult {
         _ = stop(runner)
         return start(runner)
+    }
+
+    func cancelRun(_ runner: RunnerConfig, runID: Int64) -> ShellResult {
+        Shell.run(["gh", "api", "-X", "POST", "repos/\(runner.owner)/\(runner.repo)/actions/runs/\(runID)/cancel"])
     }
 
     func register(_ runner: RunnerConfig) -> ShellResult {
@@ -303,6 +394,100 @@ final class RunnerMonitor: @unchecked Sendable {
         }
     }
 
+    private func currentRuns(for runner: RunnerConfig) -> [RunnerRunActivity] {
+        let inProgress = workflowRuns(for: runner, status: "in_progress")
+        let queued = workflowRuns(for: runner, status: "queued")
+        let runs = Array((inProgress + queued).prefix(12))
+        var activities: [RunnerRunActivity] = []
+
+        for run in runs {
+            let jobs = jobs(for: runner, runID: run.id)
+            let matchingJobs = jobs.filter { job in
+                if let runnerName = job.runnerName {
+                    return runnerName == runner.runnerName
+                }
+                return run.status == "queued"
+            }
+
+            if matchingJobs.isEmpty, run.status == "queued" {
+                activities.append(
+                    RunnerRunActivity(
+                        runID: run.id,
+                        runName: run.displayTitle ?? run.name ?? "Queued run",
+                        jobName: "Waiting for matching runner",
+                        status: run.status,
+                        runnerName: nil,
+                        htmlURL: run.htmlURL
+                    )
+                )
+            } else {
+                activities.append(contentsOf: matchingJobs.map { job in
+                    RunnerRunActivity(
+                        runID: run.id,
+                        runName: run.displayTitle ?? run.name ?? "Workflow run",
+                        jobName: job.name,
+                        status: job.status,
+                        runnerName: job.runnerName,
+                        htmlURL: job.htmlURL ?? run.htmlURL
+                    )
+                })
+            }
+        }
+
+        return Array(activities.prefix(8))
+    }
+
+    private func workflowRuns(for runner: RunnerConfig, status: String) -> [GitHubRun] {
+        let result = Shell.run(["gh", "api", "repos/\(runner.owner)/\(runner.repo)/actions/runs", "-f", "status=\(status)", "-f", "per_page=10"])
+        guard result.status == 0 else { return [] }
+        do {
+            return try JSONDecoder().decode(GitHubRunsResponse.self, from: Data(result.output.utf8)).workflowRuns
+        } catch {
+            return []
+        }
+    }
+
+    private func jobs(for runner: RunnerConfig, runID: Int64) -> [GitHubJob] {
+        let result = Shell.run(["gh", "api", "repos/\(runner.owner)/\(runner.repo)/actions/runs/\(runID)/jobs", "-f", "per_page=100"])
+        guard result.status == 0 else { return [] }
+        do {
+            return try JSONDecoder().decode(GitHubJobsResponse.self, from: Data(result.output.utf8)).jobs
+        } catch {
+            return []
+        }
+    }
+
+    private func recentEvents(for runner: RunnerConfig) -> [String] {
+        guard let logPath = serviceStdoutLogPath(for: runner) else {
+            return []
+        }
+        let result = Shell.run(["tail", "-n", "160", logPath])
+        guard result.status == 0 else { return [] }
+        let lines = result.output
+            .split(separator: "\n")
+            .map(String.init)
+            .filter { line in
+                line.contains("Running job:") || line.contains("Job ") && line.contains(" completed with result:")
+            }
+        return Array(lines.suffix(8).reversed())
+    }
+
+    private func serviceStdoutLogPath(for runner: RunnerConfig) -> String? {
+        let serviceFile = URL(fileURLWithPath: runner.runnerPath).appendingPathComponent(".service").path
+        guard let plistPath = try? String(contentsOfFile: serviceFile, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !plistPath.isEmpty
+        else {
+            return nil
+        }
+        let serviceName = URL(fileURLWithPath: plistPath).deletingPathExtension().lastPathComponent
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Logs")
+            .appendingPathComponent(serviceName)
+            .appendingPathComponent("stdout.log")
+            .path
+    }
+
     private func powerState() -> PowerSnapshot {
         let result = Shell.run(["pmset", "-g", "custom"])
         guard result.status == 0 else {
@@ -372,6 +557,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var power = PowerSnapshot(acSleep: nil, acDisplaySleep: nil, acDiskSleep: nil, acWakeOnNetwork: nil)
     private var timer: Timer?
     private var isRefreshing = false
+    private var dashboardWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -411,6 +597,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.isRefreshing = false
                 self.updateTitleForCurrentState()
                 self.rebuildMenu()
+                self.rebuildDashboardIfVisible()
             }
         }
     }
@@ -441,6 +628,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "RunnerBar  \(overallSummary())", action: nil, keyEquivalent: ""))
         menu.addItem(.separator())
+        menu.addItem(actionItem("Open Dashboard...", selector: #selector(openDashboard)))
         menu.addItem(actionItem("Refresh Now", selector: #selector(refreshAction)))
         menu.addItem(actionItem("Start All Runners", selector: #selector(startAllRunners)))
         menu.addItem(actionItem("Stop All Runners", selector: #selector(stopAllRunners)))
@@ -546,6 +734,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func refreshAction() {
         refresh()
+    }
+
+    @objc private func openDashboard() {
+        if dashboardWindow == nil {
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 980, height: 720),
+                styleMask: [.titled, .closable, .resizable],
+                backing: .buffered,
+                defer: false
+            )
+            window.title = "RunnerBar Dashboard"
+            window.minSize = NSSize(width: 820, height: 520)
+            window.center()
+            dashboardWindow = window
+        }
+        rebuildDashboard()
+        dashboardWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     @objc private func reloadConfig() {
@@ -740,6 +946,238 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 Task { @MainActor in
                     self?.refresh()
                 }
+            }
+        }
+    }
+
+    private func rebuildDashboardIfVisible() {
+        guard dashboardWindow?.isVisible == true else { return }
+        rebuildDashboard()
+    }
+
+    private func rebuildDashboard() {
+        guard let window = dashboardWindow else { return }
+        let scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = false
+
+        let content = NSStackView()
+        content.orientation = .vertical
+        content.spacing = 16
+        content.edgeInsets = NSEdgeInsets(top: 18, left: 18, bottom: 18, right: 18)
+        content.translatesAutoresizingMaskIntoConstraints = false
+
+        content.addArrangedSubview(dashboardHeader())
+        content.addArrangedSubview(powerCard())
+
+        if snapshots.isEmpty {
+            content.addArrangedSubview(textLabel("No runners configured.", size: 14, color: .secondaryLabelColor))
+        } else {
+            for snapshot in snapshots {
+                content.addArrangedSubview(runnerCard(snapshot))
+            }
+        }
+
+        scrollView.documentView = content
+        window.contentView = scrollView
+
+        NSLayoutConstraint.activate([
+            content.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor)
+        ])
+    }
+
+    private func dashboardHeader() -> NSView {
+        let stack = NSStackView()
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 12
+
+        let title = textLabel("RunnerBar Dashboard", size: 20, color: .labelColor, weight: .semibold)
+        let summary = textLabel(overallSummary(), size: 13, color: .secondaryLabelColor)
+        let refreshButton = NSButton(title: "Refresh", target: self, action: #selector(refreshAction))
+        refreshButton.bezelStyle = .rounded
+
+        stack.addArrangedSubview(title)
+        stack.addArrangedSubview(summary)
+        stack.addArrangedSubview(spacer())
+        stack.addArrangedSubview(refreshButton)
+        return stack
+    }
+
+    private func powerCard() -> NSView {
+        let box = card()
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.spacing = 8
+        stack.edgeInsets = NSEdgeInsets(top: 14, left: 14, bottom: 14, right: 14)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        let status = power.isRunnerFriendly ? "Runner-friendly" : "Needs attention"
+        stack.addArrangedSubview(textLabel("Mac Power Policy  \(status)", size: 15, color: power.isRunnerFriendly ? .systemGreen : .systemOrange, weight: .semibold))
+        stack.addArrangedSubview(textLabel("AC sleep=\(power.acSleep ?? "?")  display=\(power.acDisplaySleep ?? "?")  disk=\(power.acDiskSleep ?? "?")  wake-on-network=\(power.acWakeOnNetwork ?? "?")", size: 12, color: .secondaryLabelColor))
+        if !power.isRunnerFriendly {
+            let button = NSButton(title: "Copy Sleep Fix Command", target: self, action: #selector(copyPowerFixCommand))
+            button.bezelStyle = .rounded
+            stack.addArrangedSubview(button)
+        }
+
+        box.contentView?.addSubview(stack)
+        pin(stack, to: box.contentView)
+        return box
+    }
+
+    private func runnerCard(_ snapshot: RunnerSnapshot) -> NSView {
+        let box = card()
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.spacing = 10
+        stack.edgeInsets = NSEdgeInsets(top: 14, left: 14, bottom: 14, right: 14)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        let header = NSStackView()
+        header.orientation = .horizontal
+        header.alignment = .centerY
+        header.spacing = 10
+        header.addArrangedSubview(textLabel(snapshot.config.displayName, size: 16, color: .labelColor, weight: .semibold))
+        header.addArrangedSubview(textLabel("\(snapshot.config.owner)/\(snapshot.config.repo)", size: 12, color: .secondaryLabelColor))
+        header.addArrangedSubview(spacer())
+        header.addArrangedSubview(statusBadge(compactSummary(snapshot), snapshot: snapshot))
+        stack.addArrangedSubview(header)
+
+        stack.addArrangedSubview(textLabel("Service: \(snapshot.serviceState.rawValue)   GitHub: \(snapshot.githubStatus ?? "unknown")   Runner: \(snapshot.config.runnerName)", size: 12, color: .secondaryLabelColor))
+        stack.addArrangedSubview(textLabel("Labels: \(snapshot.labels.joined(separator: ", "))", size: 12, color: .secondaryLabelColor))
+
+        if let error = snapshot.error, !error.isEmpty {
+            stack.addArrangedSubview(textLabel("GitHub error: \(error)", size: 12, color: .systemRed))
+        }
+
+        stack.addArrangedSubview(sectionTitle("Current Requests"))
+        if snapshot.currentRuns.isEmpty {
+            stack.addArrangedSubview(textLabel("No active or queued requests for this runner.", size: 12, color: .secondaryLabelColor))
+        } else {
+            for activity in snapshot.currentRuns {
+                stack.addArrangedSubview(activityRow(activity, runnerID: snapshot.config.id))
+            }
+        }
+
+        stack.addArrangedSubview(sectionTitle("Recent Runner Events"))
+        if snapshot.recentEvents.isEmpty {
+            stack.addArrangedSubview(textLabel("No recent local runner events found.", size: 12, color: .secondaryLabelColor))
+        } else {
+            for event in snapshot.recentEvents {
+                stack.addArrangedSubview(textLabel(event, size: 11, color: .secondaryLabelColor))
+            }
+        }
+
+        box.contentView?.addSubview(stack)
+        pin(stack, to: box.contentView)
+        return box
+    }
+
+    private func activityRow(_ activity: RunnerRunActivity, runnerID: String) -> NSView {
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 10
+
+        let text = "\(activity.status.uppercased())  \(activity.runName)  ->  \(activity.jobName)"
+        row.addArrangedSubview(textLabel(text, size: 12, color: .labelColor))
+        row.addArrangedSubview(spacer())
+
+        let open = RunActionButton(title: "Open", target: self, action: #selector(openRun(_:)))
+        open.bezelStyle = .rounded
+        open.actionRef = RunActionRef(runnerID: runnerID, runID: activity.runID, url: activity.htmlURL)
+        row.addArrangedSubview(open)
+
+        let cancel = RunActionButton(title: "Cancel", target: self, action: #selector(cancelRun(_:)))
+        cancel.bezelStyle = .rounded
+        cancel.actionRef = RunActionRef(runnerID: runnerID, runID: activity.runID, url: activity.htmlURL)
+        row.addArrangedSubview(cancel)
+
+        return row
+    }
+
+    private func card() -> NSBox {
+        let box = NSBox()
+        box.boxType = .custom
+        box.cornerRadius = 8
+        box.borderColor = .separatorColor
+        box.fillColor = .controlBackgroundColor
+        return box
+    }
+
+    private func textLabel(_ text: String, size: CGFloat, color: NSColor, weight: NSFont.Weight = .regular) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: size, weight: weight)
+        label.textColor = color
+        label.lineBreakMode = .byWordWrapping
+        label.maximumNumberOfLines = 0
+        return label
+    }
+
+    private func sectionTitle(_ text: String) -> NSTextField {
+        textLabel(text, size: 13, color: .labelColor, weight: .semibold)
+    }
+
+    private func statusBadge(_ text: String, snapshot: RunnerSnapshot) -> NSTextField {
+        let color: NSColor
+        if snapshot.error != nil || snapshot.serviceState == .error {
+            color = .systemRed
+        } else if snapshot.isBusy {
+            color = .systemBlue
+        } else if snapshot.isOnline {
+            color = .systemGreen
+        } else {
+            color = .secondaryLabelColor
+        }
+        return textLabel(text, size: 13, color: color, weight: .semibold)
+    }
+
+    private func spacer() -> NSView {
+        let view = NSView()
+        view.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        return view
+    }
+
+    private func pin(_ child: NSView, to parent: NSView?) {
+        guard let parent else { return }
+        NSLayoutConstraint.activate([
+            child.topAnchor.constraint(equalTo: parent.topAnchor),
+            child.leadingAnchor.constraint(equalTo: parent.leadingAnchor),
+            child.trailingAnchor.constraint(equalTo: parent.trailingAnchor),
+            child.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
+        ])
+    }
+
+    @objc private func openRun(_ sender: RunActionButton) {
+        guard let action = sender.actionRef,
+              let url = URL(string: action.url)
+        else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    @objc private func cancelRun(_ sender: RunActionButton) {
+        guard let action = sender.actionRef,
+              let runner = config.runners.first(where: { $0.id == action.runnerID })
+        else { return }
+
+        let alert = NSAlert()
+        alert.messageText = "Cancel workflow run?"
+        alert.informativeText = "This sends a GitHub cancel request for run \(action.runID)."
+        alert.addButton(withTitle: "Cancel Run")
+        alert.addButton(withTitle: "Keep Running")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        let monitor = monitor
+        let runID = action.runID
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = monitor.cancelRun(runner, runID: runID)
+            Task { @MainActor in
+                guard let self else { return }
+                if result.status != 0 {
+                    self.showError("Cancel failed", detail: result.output)
+                }
+                self.refresh()
             }
         }
     }
