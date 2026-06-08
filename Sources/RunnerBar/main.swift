@@ -108,6 +108,13 @@ struct RunnerRunActivity: Sendable {
     var htmlURL: String
 }
 
+struct RunnerLogEvent: Sendable {
+    var timestamp: String
+    var status: String
+    var jobName: String
+    var detail: String
+}
+
 enum ServiceState: String, Sendable {
     case started = "Started"
     case stopped = "Stopped"
@@ -123,7 +130,7 @@ struct RunnerSnapshot: Sendable {
     var labels: [String]
     var error: String?
     var currentRuns: [RunnerRunActivity]
-    var recentEvents: [String]
+    var recentEvents: [RunnerLogEvent]
 
     var isOnline: Bool {
         serviceState == .started && githubStatus == "online"
@@ -191,6 +198,12 @@ final class RunActionRef: NSObject {
 
 final class RunActionButton: NSButton {
     var actionRef: RunActionRef?
+}
+
+final class FlippedView: NSView {
+    override var isFlipped: Bool {
+        true
+    }
 }
 
 enum Shell {
@@ -312,6 +325,14 @@ final class RunnerMonitor: @unchecked Sendable {
 
     func applyRunnerPowerPolicy() -> ShellResult {
         let command = "pmset -c sleep 0 displaysleep 30 disksleep 0 powernap 1 womp 1"
+        let script = """
+        do shell script "\(command)" with administrator privileges
+        """
+        return Shell.run(["osascript", "-e", script])
+    }
+
+    func restoreDefaultPowerPolicy() -> ShellResult {
+        let command = "pmset -c sleep 1 displaysleep 10 disksleep 10 powernap 1 womp 1"
         let script = """
         do shell script "\(command)" with administrator privileges
         """
@@ -475,19 +496,44 @@ final class RunnerMonitor: @unchecked Sendable {
         }
     }
 
-    private func recentEvents(for runner: RunnerConfig) -> [String] {
+    private func recentEvents(for runner: RunnerConfig) -> [RunnerLogEvent] {
         guard let logPath = serviceStdoutLogPath(for: runner) else {
             return []
         }
         let result = Shell.run(["tail", "-n", "160", logPath])
         guard result.status == 0 else { return [] }
-        let lines = result.output
+        let events = result.output
             .split(separator: "\n")
             .map(String.init)
-            .filter { line in
-                line.contains("Running job:") || line.contains("Job ") && line.contains(" completed with result:")
-            }
-        return Array(lines.suffix(8).reversed())
+            .compactMap(parseRunnerEvent)
+        return Array(events.suffix(8).reversed())
+    }
+
+    private func parseRunnerEvent(_ line: String) -> RunnerLogEvent? {
+        guard let separatorRange = line.range(of: ": ") else { return nil }
+        let timestamp = String(line[..<separatorRange.lowerBound])
+        let message = String(line[separatorRange.upperBound...])
+
+        if let range = message.range(of: "Running job: ") {
+            return RunnerLogEvent(
+                timestamp: timestamp,
+                status: "Running",
+                jobName: String(message[range.upperBound...]),
+                detail: "Job assigned to runner"
+            )
+        }
+
+        if message.hasPrefix("Job "), let resultRange = message.range(of: " completed with result: ") {
+            let start = message.index(message.startIndex, offsetBy: 4)
+            return RunnerLogEvent(
+                timestamp: timestamp,
+                status: String(message[resultRange.upperBound...]),
+                jobName: String(message[start..<resultRange.lowerBound]),
+                detail: "Completed"
+            )
+        }
+
+        return nil
     }
 
     private func serviceStdoutLogPath(for runner: RunnerConfig) -> String? {
@@ -725,6 +771,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !power.isRunnerFriendly {
             menu.addItem(actionItem("\(t("applyPower"))...", selector: #selector(applyPowerPolicy)))
             menu.addItem(actionItem(t("copyCommand"), selector: #selector(copyPowerFixCommand)))
+        } else {
+            menu.addItem(actionItem("\(t("restorePower"))...", selector: #selector(restorePowerPolicy)))
         }
     }
 
@@ -793,6 +841,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "runnerFriendly": "러너 친화적",
             "needsAttention": "확인 필요",
             "applyPower": "러너 전원 정책 적용",
+            "restorePower": "기본 전원 정책 복구",
             "copyCommand": "명령 복사",
             "currentRequests": "현재 요청",
             "recentEvents": "최근 러너 이벤트",
@@ -839,6 +888,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "runnerFriendly": "Runner-friendly",
             "needsAttention": "Needs attention",
             "applyPower": "Apply Runner Power Policy",
+            "restorePower": "Restore Default Power Policy",
             "copyCommand": "Copy Command",
             "currentRequests": "Current Requests",
             "recentEvents": "Recent Runner Events",
@@ -1116,6 +1166,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         content.spacing = 16
         content.edgeInsets = NSEdgeInsets(top: 18, left: 18, bottom: 18, right: 18)
         content.translatesAutoresizingMaskIntoConstraints = false
+        content.alignment = .width
 
         content.addArrangedSubview(dashboardHeader())
         content.addArrangedSubview(powerCard())
@@ -1128,11 +1179,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        scrollView.documentView = content
+        let document = FlippedView()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        document.addSubview(content)
+        scrollView.documentView = document
         window.contentView = scrollView
 
         NSLayoutConstraint.activate([
-            content.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor)
+            document.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
+            content.topAnchor.constraint(equalTo: document.topAnchor),
+            content.leadingAnchor.constraint(equalTo: document.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: document.trailingAnchor),
+            content.bottomAnchor.constraint(equalTo: document.bottomAnchor)
         ])
     }
 
@@ -1176,6 +1234,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             buttons.addArrangedSubview(apply)
             buttons.addArrangedSubview(copy)
             stack.addArrangedSubview(buttons)
+        } else {
+            let restore = NSButton(title: t("restorePower"), target: self, action: #selector(restorePowerPolicy))
+            restore.bezelStyle = .rounded
+            stack.addArrangedSubview(restore)
         }
 
         box.contentView?.addSubview(stack)
@@ -1222,7 +1284,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             stack.addArrangedSubview(textLabel(t("noRecentEvents"), size: 12, color: .secondaryLabelColor))
         } else {
             for event in snapshot.recentEvents {
-                stack.addArrangedSubview(textLabel(event, size: 11, color: .secondaryLabelColor))
+                stack.addArrangedSubview(eventRow(event))
             }
         }
 
@@ -1252,6 +1314,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         row.addArrangedSubview(cancel)
 
         return row
+    }
+
+    private func eventRow(_ event: RunnerLogEvent) -> NSView {
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 10
+
+        let statusColor: NSColor
+        switch event.status.lowercased() {
+        case "running":
+            statusColor = .systemBlue
+        case "succeeded":
+            statusColor = .systemGreen
+        case "failed":
+            statusColor = .systemRed
+        default:
+            statusColor = .secondaryLabelColor
+        }
+
+        let status = textLabel(event.status, size: 11, color: statusColor, weight: .semibold)
+        status.widthAnchor.constraint(equalToConstant: 84).isActive = true
+        let time = textLabel(compactTime(event.timestamp), size: 11, color: .tertiaryLabelColor)
+        time.widthAnchor.constraint(equalToConstant: 128).isActive = true
+        let job = textLabel(event.jobName, size: 12, color: .secondaryLabelColor)
+
+        row.addArrangedSubview(status)
+        row.addArrangedSubview(time)
+        row.addArrangedSubview(job)
+        return row
+    }
+
+    private func compactTime(_ timestamp: String) -> String {
+        timestamp
+            .replacingOccurrences(of: "2026-", with: "")
+            .replacingOccurrences(of: "T", with: " ")
+            .replacingOccurrences(of: "Z", with: "")
     }
 
     private func card() -> NSBox {
@@ -1606,6 +1705,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if result.status != 0 {
                     self.updateTitleForCurrentState()
                     self.showError("Power policy failed", detail: result.output.isEmpty ? "macOS did not apply the pmset command." : result.output)
+                }
+                self.refresh()
+            }
+        }
+    }
+
+    @objc private func restorePowerPolicy() {
+        let alert = NSAlert()
+        alert.messageText = "Restore default power policy?"
+        alert.informativeText = "RunnerBar will ask macOS for administrator permission and restore AC power sleep=1, displaysleep=10, disksleep=10, powernap=1, and wake-on-network=1."
+        alert.addButton(withTitle: "Restore")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        let monitor = monitor
+        updateTitle(color: .systemYellow, text: "PWR")
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = monitor.restoreDefaultPowerPolicy()
+            Task { @MainActor in
+                guard let self else { return }
+                if result.status != 0 {
+                    self.updateTitleForCurrentState()
+                    self.showError("Power policy restore failed", detail: result.output.isEmpty ? "macOS did not apply the pmset command." : result.output)
                 }
                 self.refresh()
             }

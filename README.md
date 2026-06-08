@@ -39,6 +39,7 @@ open .build/RunnerBar.app
 - See recent local runner service events from the runner log.
 - See current AC sleep policy in the dashboard.
 - Apply the recommended AC power policy from the app with a macOS administrator prompt.
+- Restore the default AC power policy from the app.
 - Switch the app between English and Korean from the Settings menu.
 - Register a new GitHub repository runner from the menu bar app.
 - Add repository runners from the menu bar app.
