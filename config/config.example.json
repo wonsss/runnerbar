@@ -1,5 +1,8 @@
 {
+  "language": "en",
   "refreshIntervalSeconds": 20,
+  "defaultAIProvider": "codex",
+  "aiProviderFallbackOrder": ["codex", "claude"],
   "runners": [
     {
       "id": "reading-crew",

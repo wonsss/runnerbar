@@ -3,17 +3,54 @@ import Foundation
 
 struct RunnerBarConfig: Codable, Sendable {
     var language: String?
+    var defaultAIProvider: String?
+    var aiProviderFallbackOrder: [String]?
     var refreshIntervalSeconds: TimeInterval
     var runners: [RunnerConfig]
 
     var appLanguage: AppLanguage {
         AppLanguage(rawValue: language ?? "") ?? .english
     }
+
+    var selectedAIProvider: AIProvider {
+        AIProvider(rawValue: defaultAIProvider ?? "") ?? .codex
+    }
+
+    var effectiveAIFallbackOrder: [AIProvider] {
+        let configured = aiProviderFallbackOrder?
+            .compactMap(AIProvider.init(rawValue:)) ?? []
+        if configured.isEmpty {
+            return AIProvider.allCases
+        }
+        let missing = AIProvider.allCases.filter { !configured.contains($0) }
+        return configured + missing
+    }
 }
 
 enum AppLanguage: String, Sendable {
     case english = "en"
     case korean = "ko"
+}
+
+enum AIProvider: String, CaseIterable, Sendable {
+    case codex
+    case claude
+
+    var displayName: String {
+        switch self {
+        case .codex: "Codex"
+        case .claude: "Claude Code"
+        }
+    }
+
+    var healthCommand: [String] {
+        switch self {
+        case .codex:
+            ["codex", "exec", "Say READY in one word."]
+        case .claude:
+            ["claude", "-p", "Say READY in one word.", "--max-turns", "1"]
+        }
+    }
 }
 
 struct RunnerConfig: Codable, Identifiable, Sendable {
@@ -588,6 +625,8 @@ final class RunnerMonitor: @unchecked Sendable {
     private func defaultConfig() -> RunnerBarConfig {
         RunnerBarConfig(
             language: AppLanguage.english.rawValue,
+            defaultAIProvider: AIProvider.codex.rawValue,
+            aiProviderFallbackOrder: AIProvider.allCases.map(\.rawValue),
             refreshIntervalSeconds: 20,
             runners: [
                 RunnerConfig(
@@ -727,6 +766,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let item = NSMenuItem(title: t("settings"), action: nil, keyEquivalent: "")
         let submenu = NSMenu()
         submenu.addItem(actionItem(t("configSettings"), selector: #selector(configSettings)))
+        submenu.addItem(aiProviderMenu())
         submenu.addItem(actionItem(t("reloadConfig"), selector: #selector(reloadConfig)))
         submenu.addItem(actionItem(t("openConfig"), selector: #selector(openConfig)))
         submenu.addItem(.separator())
@@ -736,6 +776,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         korean.state = config.appLanguage == .korean ? .on : .off
         submenu.addItem(english)
         submenu.addItem(korean)
+        item.submenu = submenu
+        return item
+    }
+
+    private func aiProviderMenu() -> NSMenuItem {
+        let item = NSMenuItem(title: t("aiProvider"), action: nil, keyEquivalent: "")
+        let submenu = NSMenu()
+
+        for provider in AIProvider.allCases {
+            let providerItem = actionItem(provider.displayName, selector: #selector(setAIProvider(_:)), representedObject: provider.rawValue)
+            providerItem.state = config.selectedAIProvider == provider ? .on : .off
+            submenu.addItem(providerItem)
+        }
+
+        submenu.addItem(.separator())
+        submenu.addItem(actionItem(t("aiFallbackOrder"), selector: #selector(toggleAIFallbackOrder)))
+        submenu.addItem(actionItem(t("aiHealthCheck"), selector: #selector(runAIHealthCheck)))
         item.submenu = submenu
         return item
     }
@@ -825,6 +882,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "refreshNow": "지금 새로고침",
             "manageRunners": "러너 관리",
             "settings": "설정",
+            "aiProvider": "AI 제공자",
+            "aiFallbackOrder": "Fallback 순서 전환",
+            "aiHealthCheck": "AI 상태 확인",
             "startAll": "전체 러너 시작",
             "stopAll": "전체 러너 중지",
             "restartAll": "전체 러너 재시작",
@@ -872,6 +932,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "refreshNow": "Refresh Now",
             "manageRunners": "Manage Runners",
             "settings": "Settings",
+            "aiProvider": "AI Provider",
+            "aiFallbackOrder": "Toggle Fallback Order",
+            "aiHealthCheck": "AI Health Check",
             "startAll": "Start All Runners",
             "stopAll": "Stop All Runners",
             "restartAll": "Restart All Runners",
@@ -957,6 +1020,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func setKorean() {
         config.language = AppLanguage.korean.rawValue
         saveCurrentConfig()
+    }
+
+    @objc private func setAIProvider(_ sender: NSMenuItem) {
+        guard let rawValue = sender.representedObject as? String,
+              let provider = AIProvider(rawValue: rawValue)
+        else { return }
+        config.defaultAIProvider = provider.rawValue
+        let currentFallbacks = config.effectiveAIFallbackOrder
+        config.aiProviderFallbackOrder = ([provider] + currentFallbacks.filter { $0 != provider }).map(\.rawValue)
+        saveCurrentConfig()
+    }
+
+    @objc private func toggleAIFallbackOrder() {
+        let current = config.effectiveAIFallbackOrder
+        let next: [AIProvider]
+        if current.first == .codex {
+            next = [.claude, .codex]
+            config.defaultAIProvider = AIProvider.claude.rawValue
+        } else {
+            next = [.codex, .claude]
+            config.defaultAIProvider = AIProvider.codex.rawValue
+        }
+        config.aiProviderFallbackOrder = next.map(\.rawValue)
+        saveCurrentConfig()
+    }
+
+    @objc private func runAIHealthCheck() {
+        let providers = config.effectiveAIFallbackOrder
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let lines = providers.map { provider -> String in
+                let result = Shell.run(provider.healthCommand)
+                let ok = result.status == 0 && result.output.localizedCaseInsensitiveContains("READY")
+                let status = ok ? "OK" : "FAILED"
+                let output = result.output
+                    .split(separator: "\n")
+                    .prefix(6)
+                    .joined(separator: "\n")
+                return "\(provider.displayName): \(status)\n\(output)"
+            }
+            Task { @MainActor in
+                self?.showInfo("AI Health Check", detail: lines.joined(separator: "\n\n"))
+            }
+        }
     }
 
     @objc private func addRepositoryRunner() {
@@ -1166,9 +1272,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         content.spacing = 16
         content.edgeInsets = NSEdgeInsets(top: 18, left: 18, bottom: 18, right: 18)
         content.translatesAutoresizingMaskIntoConstraints = false
-        content.alignment = .width
+        content.alignment = .leading
 
         content.addArrangedSubview(dashboardHeader())
+        content.addArrangedSubview(aiProviderCard())
         content.addArrangedSubview(powerCard())
 
         if snapshots.isEmpty {
@@ -1189,7 +1296,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             document.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
             content.topAnchor.constraint(equalTo: document.topAnchor),
             content.leadingAnchor.constraint(equalTo: document.leadingAnchor),
-            content.trailingAnchor.constraint(equalTo: document.trailingAnchor),
             content.bottomAnchor.constraint(equalTo: document.bottomAnchor)
         ])
     }
@@ -1209,6 +1315,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stack.addArrangedSubview(summary)
         stack.addArrangedSubview(spacer())
         stack.addArrangedSubview(refreshButton)
+        stack.widthAnchor.constraint(equalToConstant: 920).isActive = true
         return stack
     }
 
@@ -1223,6 +1330,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let status = power.isRunnerFriendly ? t("runnerFriendly") : t("needsAttention")
         stack.addArrangedSubview(textLabel("\(t("powerPolicy"))  \(status)", size: 15, color: power.isRunnerFriendly ? .systemGreen : .systemOrange, weight: .semibold))
         stack.addArrangedSubview(textLabel("AC sleep=\(power.acSleep ?? "?")  display=\(power.acDisplaySleep ?? "?")  disk=\(power.acDiskSleep ?? "?")  wake-on-network=\(power.acWakeOnNetwork ?? "?")", size: 12, color: .secondaryLabelColor))
+        stack.addArrangedSubview(textLabel(powerPolicyExplanation(), size: 11, color: .secondaryLabelColor))
         if !power.isRunnerFriendly {
             let buttons = NSStackView()
             buttons.orientation = .horizontal
@@ -1242,6 +1350,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         box.contentView?.addSubview(stack)
         pin(stack, to: box.contentView)
+        box.widthAnchor.constraint(equalToConstant: 760).isActive = true
+        return box
+    }
+
+    private func aiProviderCard() -> NSView {
+        let box = card()
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.spacing = 8
+        stack.edgeInsets = NSEdgeInsets(top: 14, left: 14, bottom: 14, right: 14)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        let fallback = config.effectiveAIFallbackOrder.map(\.displayName).joined(separator: " -> ")
+        stack.addArrangedSubview(textLabel("\(t("aiProvider"))  \(config.selectedAIProvider.displayName)", size: 15, color: .labelColor, weight: .semibold))
+        stack.addArrangedSubview(textLabel("Fallback: \(fallback)", size: 12, color: .secondaryLabelColor))
+        let health = NSButton(title: t("aiHealthCheck"), target: self, action: #selector(runAIHealthCheck))
+        health.bezelStyle = .rounded
+        stack.addArrangedSubview(health)
+
+        box.contentView?.addSubview(stack)
+        pin(stack, to: box.contentView)
+        box.widthAnchor.constraint(equalToConstant: 760).isActive = true
         return box
     }
 
@@ -1290,6 +1420,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         box.contentView?.addSubview(stack)
         pin(stack, to: box.contentView)
+        box.widthAnchor.constraint(equalToConstant: 920).isActive = true
         return box
     }
 
@@ -1337,8 +1468,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let status = textLabel(event.status, size: 11, color: statusColor, weight: .semibold)
         status.widthAnchor.constraint(equalToConstant: 84).isActive = true
         let time = textLabel(compactTime(event.timestamp), size: 11, color: .tertiaryLabelColor)
-        time.widthAnchor.constraint(equalToConstant: 128).isActive = true
+        time.widthAnchor.constraint(equalToConstant: 150).isActive = true
         let job = textLabel(event.jobName, size: 12, color: .secondaryLabelColor)
+        job.widthAnchor.constraint(lessThanOrEqualToConstant: 560).isActive = true
 
         row.addArrangedSubview(status)
         row.addArrangedSubview(time)
@@ -1347,10 +1479,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func compactTime(_ timestamp: String) -> String {
-        timestamp
-            .replacingOccurrences(of: "2026-", with: "")
-            .replacingOccurrences(of: "T", with: " ")
-            .replacingOccurrences(of: "Z", with: "")
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        guard let date = formatter.date(from: timestamp) else {
+            return timestamp
+                .replacingOccurrences(of: "2026-", with: "")
+                .replacingOccurrences(of: "T", with: " ")
+                .replacingOccurrences(of: "Z", with: "")
+        }
+
+        let output = DateFormatter()
+        output.timeZone = TimeZone(identifier: "Asia/Seoul")
+        output.dateFormat = "MM-dd HH:mm:ss 'KST'"
+        return output.string(from: date)
+    }
+
+    private func powerPolicyExplanation() -> String {
+        if config.appLanguage == .korean {
+            return "러너 전원 정책은 AC 전원 연결 중 시스템/디스크 잠자기를 막아 GitHub job 대기와 실행이 끊기지 않도록 합니다. 화면은 30분 뒤 꺼지고, 네트워크 깨우기는 유지됩니다."
+        }
+        return "Runner power policy prevents system and disk sleep while on AC power so GitHub jobs keep waiting and running. The display still sleeps after 30 minutes, and wake-on-network remains enabled."
     }
 
     private func card() -> NSBox {

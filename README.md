@@ -41,6 +41,28 @@ open .build/RunnerBar.app
 - Apply the recommended AC power policy from the app with a macOS administrator prompt.
 - Restore the default AC power policy from the app.
 - Switch the app between English and Korean from the Settings menu.
+- Select the default AI provider and fallback order for CI analysis.
+
+## AI Providers
+
+Choose:
+
+```text
+RunnerBar -> Settings -> AI Provider
+```
+
+Supported providers:
+
+- Codex: `codex exec`
+- Claude Code: `claude -p --max-turns 1`
+
+RunnerBar saves the selected provider and fallback order to `~/.runnerbar/config.json`.
+CI scripts can use the helper below to run the first available provider and fall back
+when a provider returns a rate-limit or quota error:
+
+```bash
+scripts/run-ai-analysis.sh prompt.md analysis.md
+```
 - Register a new GitHub repository runner from the menu bar app.
 - Add repository runners from the menu bar app.
 - Start, stop, and restart each configured runner service.
