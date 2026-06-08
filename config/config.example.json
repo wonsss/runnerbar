@@ -1,0 +1,14 @@
+{
+  "refreshIntervalSeconds": 20,
+  "runners": [
+    {
+      "id": "reading-crew",
+      "displayName": "Reading Crew",
+      "owner": "wonsss",
+      "repo": "reading-crew",
+      "runnerName": "macbook-air-ai-analyzer",
+      "runnerPath": "/Users/marco/actions-runner-readingcrew",
+      "labels": ["readingcrew-ai-analyzer"]
+    }
+  ]
+}
