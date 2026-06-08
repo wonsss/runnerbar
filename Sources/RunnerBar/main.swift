@@ -2,8 +2,18 @@ import AppKit
 import Foundation
 
 struct RunnerBarConfig: Codable, Sendable {
+    var language: String?
     var refreshIntervalSeconds: TimeInterval
     var runners: [RunnerConfig]
+
+    var appLanguage: AppLanguage {
+        AppLanguage(rawValue: language ?? "") ?? .english
+    }
+}
+
+enum AppLanguage: String, Sendable {
+    case english = "en"
+    case korean = "ko"
 }
 
 struct RunnerConfig: Codable, Identifiable, Sendable {
@@ -300,6 +310,14 @@ final class RunnerMonitor: @unchecked Sendable {
         return start(runner)
     }
 
+    func applyRunnerPowerPolicy() -> ShellResult {
+        let command = "pmset -c sleep 0 displaysleep 30 disksleep 0 powernap 1 womp 1"
+        let script = """
+        do shell script "\(command)" with administrator privileges
+        """
+        return Shell.run(["osascript", "-e", script])
+    }
+
     func cancelRun(_ runner: RunnerConfig, runID: Int64) -> ShellResult {
         Shell.run(["gh", "api", "-X", "POST", "repos/\(runner.owner)/\(runner.repo)/actions/runs/\(runID)/cancel"])
     }
@@ -523,6 +541,7 @@ final class RunnerMonitor: @unchecked Sendable {
 
     private func defaultConfig() -> RunnerBarConfig {
         RunnerBarConfig(
+            language: AppLanguage.english.rawValue,
             refreshIntervalSeconds: 20,
             runners: [
                 RunnerConfig(
@@ -628,11 +647,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "RunnerBar  \(overallSummary())", action: nil, keyEquivalent: ""))
         menu.addItem(.separator())
-        menu.addItem(actionItem("Open Dashboard...", selector: #selector(openDashboard)))
-        menu.addItem(actionItem("Refresh Now", selector: #selector(refreshAction)))
-        menu.addItem(actionItem("Start All Runners", selector: #selector(startAllRunners)))
-        menu.addItem(actionItem("Stop All Runners", selector: #selector(stopAllRunners)))
-        menu.addItem(actionItem("Restart All Runners", selector: #selector(restartAllRunners)))
+        menu.addItem(actionItem(t("openDashboard"), selector: #selector(openDashboard)))
+        menu.addItem(actionItem(t("refreshNow"), selector: #selector(refreshAction)))
         menu.addItem(.separator())
 
         for snapshot in snapshots {
@@ -640,15 +656,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         menu.addItem(.separator())
-        menu.addItem(actionItem("Register New GitHub Runner...", selector: #selector(registerRepositoryRunner)))
-        menu.addItem(actionItem("Add Existing Runner Config...", selector: #selector(addRepositoryRunner)))
-        menu.addItem(actionItem("Config Settings...", selector: #selector(configSettings)))
-        menu.addItem(actionItem("Reload Config", selector: #selector(reloadConfig)))
-        menu.addItem(actionItem("Open Config", selector: #selector(openConfig)))
+        menu.addItem(managementMenu())
+        menu.addItem(settingsMenu())
         addPowerSection(to: menu)
         menu.addItem(.separator())
-        menu.addItem(actionItem("Quit", selector: #selector(quit)))
+        menu.addItem(actionItem(t("quit"), selector: #selector(quit)))
         statusItem.menu = menu
+    }
+
+    private func managementMenu() -> NSMenuItem {
+        let item = NSMenuItem(title: t("manageRunners"), action: nil, keyEquivalent: "")
+        let submenu = NSMenu()
+        submenu.addItem(actionItem(t("startAll"), selector: #selector(startAllRunners)))
+        submenu.addItem(actionItem(t("stopAll"), selector: #selector(stopAllRunners)))
+        submenu.addItem(actionItem(t("restartAll"), selector: #selector(restartAllRunners)))
+        submenu.addItem(.separator())
+        submenu.addItem(actionItem(t("registerRunner"), selector: #selector(registerRepositoryRunner)))
+        submenu.addItem(actionItem(t("addExistingConfig"), selector: #selector(addRepositoryRunner)))
+        item.submenu = submenu
+        return item
+    }
+
+    private func settingsMenu() -> NSMenuItem {
+        let item = NSMenuItem(title: t("settings"), action: nil, keyEquivalent: "")
+        let submenu = NSMenu()
+        submenu.addItem(actionItem(t("configSettings"), selector: #selector(configSettings)))
+        submenu.addItem(actionItem(t("reloadConfig"), selector: #selector(reloadConfig)))
+        submenu.addItem(actionItem(t("openConfig"), selector: #selector(openConfig)))
+        submenu.addItem(.separator())
+        let english = actionItem(t("languageEnglish"), selector: #selector(setEnglish))
+        english.state = config.appLanguage == .english ? .on : .off
+        let korean = actionItem(t("languageKorean"), selector: #selector(setKorean))
+        korean.state = config.appLanguage == .korean ? .on : .off
+        submenu.addItem(english)
+        submenu.addItem(korean)
+        item.submenu = submenu
+        return item
     }
 
     private func addRunner(_ snapshot: RunnerSnapshot, to menu: NSMenu) {
@@ -676,11 +719,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func addPowerSection(to menu: NSMenu) {
-        let status = power.isRunnerFriendly ? "OK" : "Needs attention"
-        menu.addItem(NSMenuItem(title: "AC Power: \(status)", action: nil, keyEquivalent: ""))
+        let status = power.isRunnerFriendly ? t("runnerFriendly") : t("needsAttention")
+        menu.addItem(NSMenuItem(title: "\(t("powerPolicy")): \(status)", action: nil, keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "sleep=\(power.acSleep ?? "?") displaysleep=\(power.acDisplaySleep ?? "?") disksleep=\(power.acDiskSleep ?? "?") womp=\(power.acWakeOnNetwork ?? "?")", action: nil, keyEquivalent: ""))
         if !power.isRunnerFriendly {
-            menu.addItem(actionItem("Copy AC Sleep Fix Command", selector: #selector(copyPowerFixCommand)))
+            menu.addItem(actionItem("\(t("applyPower"))...", selector: #selector(applyPowerPolicy)))
+            menu.addItem(actionItem(t("copyCommand"), selector: #selector(copyPowerFixCommand)))
         }
     }
 
@@ -727,6 +771,102 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return item
     }
 
+    private func t(_ key: String) -> String {
+        let ko: [String: String] = [
+            "openDashboard": "대시보드 열기...",
+            "refreshNow": "지금 새로고침",
+            "manageRunners": "러너 관리",
+            "settings": "설정",
+            "startAll": "전체 러너 시작",
+            "stopAll": "전체 러너 중지",
+            "restartAll": "전체 러너 재시작",
+            "registerRunner": "새 GitHub 러너 등록...",
+            "addExistingConfig": "기존 러너 설정 추가...",
+            "configSettings": "설정값 변경...",
+            "reloadConfig": "설정 다시 읽기",
+            "openConfig": "설정 파일 열기",
+            "languageEnglish": "English",
+            "languageKorean": "한국어",
+            "quit": "종료",
+            "dashboardTitle": "RunnerBar 대시보드",
+            "powerPolicy": "맥 전원 정책",
+            "runnerFriendly": "러너 친화적",
+            "needsAttention": "확인 필요",
+            "applyPower": "러너 전원 정책 적용",
+            "copyCommand": "명령 복사",
+            "currentRequests": "현재 요청",
+            "recentEvents": "최근 러너 이벤트",
+            "noCurrentRequests": "이 러너에 활성 또는 대기 중인 요청이 없습니다.",
+            "noRecentEvents": "최근 로컬 러너 이벤트가 없습니다.",
+            "open": "열기",
+            "cancel": "취소",
+            "service": "서비스",
+            "github": "GitHub",
+            "runner": "러너",
+            "labels": "라벨",
+            "displayName": "표시 이름",
+            "owner": "소유자",
+            "repo": "레포",
+            "runnerName": "러너 이름",
+            "runnerPath": "러너 경로",
+            "formHelp": "소유자와 레포는 필수입니다. 러너 이름, '/'로 끝나는 러너 경로, 빈 라벨은 레포 기준으로 자동 입력됩니다.",
+            "displayNameHelp": "RunnerBar 안에서 보이는 이름입니다. GitHub에는 영향을 주지 않습니다. 비우면 레포 이름을 씁니다.",
+            "ownerHelp": "대상 레포를 소유한 GitHub 사용자 또는 조직입니다. gh auth 접근 권한이 필요합니다.",
+            "repoHelp": "self-hosted runner를 등록할 GitHub repository입니다. 필수입니다.",
+            "runnerNameHelp": "GitHub Settings에 표시될 러너 이름입니다. 비우면 Mac과 레포 이름 기준으로 자동 생성합니다.",
+            "runnerPathHelp": "로컬 설치 디렉터리입니다. '/'로 끝나면 RunnerBar가 레포 이름을 붙여 생성합니다.",
+            "labelsHelp": "워크플로가 타겟팅할 쉼표 구분 라벨입니다. 비우면 '<repo>-runner'를 씁니다.",
+            "add": "추가"
+        ]
+        let en: [String: String] = [
+            "openDashboard": "Open Dashboard...",
+            "refreshNow": "Refresh Now",
+            "manageRunners": "Manage Runners",
+            "settings": "Settings",
+            "startAll": "Start All Runners",
+            "stopAll": "Stop All Runners",
+            "restartAll": "Restart All Runners",
+            "registerRunner": "Register New GitHub Runner...",
+            "addExistingConfig": "Add Existing Runner Config...",
+            "configSettings": "Config Settings...",
+            "reloadConfig": "Reload Config",
+            "openConfig": "Open Config",
+            "languageEnglish": "English",
+            "languageKorean": "한국어",
+            "quit": "Quit",
+            "dashboardTitle": "RunnerBar Dashboard",
+            "powerPolicy": "Mac Power Policy",
+            "runnerFriendly": "Runner-friendly",
+            "needsAttention": "Needs attention",
+            "applyPower": "Apply Runner Power Policy",
+            "copyCommand": "Copy Command",
+            "currentRequests": "Current Requests",
+            "recentEvents": "Recent Runner Events",
+            "noCurrentRequests": "No active or queued requests for this runner.",
+            "noRecentEvents": "No recent local runner events found.",
+            "open": "Open",
+            "cancel": "Cancel",
+            "service": "Service",
+            "github": "GitHub",
+            "runner": "Runner",
+            "labels": "Labels",
+            "displayName": "Display name",
+            "owner": "Owner",
+            "repo": "Repo",
+            "runnerName": "Runner name",
+            "runnerPath": "Runner path",
+            "formHelp": "Owner and repo are required. Empty runner name, runner path ending in '/', and empty labels are auto-filled from the repo.",
+            "displayNameHelp": "Name shown inside RunnerBar. It does not affect GitHub. Empty uses the repo name.",
+            "ownerHelp": "GitHub user or organization that owns the target repository. Requires access through gh auth.",
+            "repoHelp": "Repository where the self-hosted runner will be registered. This field is required.",
+            "runnerNameHelp": "Exact runner name in GitHub settings. Empty auto-generates a Mac-and-repo-specific name.",
+            "runnerPathHelp": "Local install directory. If it ends with '/', RunnerBar appends the repo name and creates that directory.",
+            "labelsHelp": "Comma-separated workflow labels. Empty uses '<repo>-runner'. Use restrictive labels per repo.",
+            "add": "Add"
+        ]
+        return (config.appLanguage == .korean ? ko[key] : en[key]) ?? key
+    }
+
     private func runner(for item: NSMenuItem) -> RunnerConfig? {
         guard let id = item.representedObject as? String else { return nil }
         return config.runners.first { $0.id == id }
@@ -744,7 +884,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 backing: .buffered,
                 defer: false
             )
-            window.title = "RunnerBar Dashboard"
+            window.title = t("dashboardTitle")
             window.minSize = NSSize(width: 820, height: 520)
             window.center()
             dashboardWindow = window
@@ -759,6 +899,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refresh()
     }
 
+    @objc private func setEnglish() {
+        config.language = AppLanguage.english.rawValue
+        saveCurrentConfig()
+    }
+
+    @objc private func setKorean() {
+        config.language = AppLanguage.korean.rawValue
+        saveCurrentConfig()
+    }
+
     @objc private func addRepositoryRunner() {
         let fields = RunnerFormFields(
             displayName: "",
@@ -768,7 +918,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             runnerPath: "",
             labels: ""
         )
-        guard let values = showRunnerForm(title: "Add Repository Runner", fields: fields) else {
+        guard let values = showRunnerForm(title: t("addExistingConfig"), fields: fields) else {
             return
         }
 
@@ -839,7 +989,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             runnerPath: "/Users/marco/actions-runners/",
             labels: ""
         )
-        guard let values = showRunnerForm(title: "Register New GitHub Runner", fields: fields) else {
+        guard let values = showRunnerForm(title: t("registerRunner"), fields: fields) else {
             return
         }
 
@@ -992,9 +1142,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stack.alignment = .centerY
         stack.spacing = 12
 
-        let title = textLabel("RunnerBar Dashboard", size: 20, color: .labelColor, weight: .semibold)
+        let title = textLabel(t("dashboardTitle"), size: 20, color: .labelColor, weight: .semibold)
         let summary = textLabel(overallSummary(), size: 13, color: .secondaryLabelColor)
-        let refreshButton = NSButton(title: "Refresh", target: self, action: #selector(refreshAction))
+        let refreshButton = NSButton(title: t("refreshNow"), target: self, action: #selector(refreshAction))
         refreshButton.bezelStyle = .rounded
 
         stack.addArrangedSubview(title)
@@ -1012,13 +1162,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stack.edgeInsets = NSEdgeInsets(top: 14, left: 14, bottom: 14, right: 14)
         stack.translatesAutoresizingMaskIntoConstraints = false
 
-        let status = power.isRunnerFriendly ? "Runner-friendly" : "Needs attention"
-        stack.addArrangedSubview(textLabel("Mac Power Policy  \(status)", size: 15, color: power.isRunnerFriendly ? .systemGreen : .systemOrange, weight: .semibold))
+        let status = power.isRunnerFriendly ? t("runnerFriendly") : t("needsAttention")
+        stack.addArrangedSubview(textLabel("\(t("powerPolicy"))  \(status)", size: 15, color: power.isRunnerFriendly ? .systemGreen : .systemOrange, weight: .semibold))
         stack.addArrangedSubview(textLabel("AC sleep=\(power.acSleep ?? "?")  display=\(power.acDisplaySleep ?? "?")  disk=\(power.acDiskSleep ?? "?")  wake-on-network=\(power.acWakeOnNetwork ?? "?")", size: 12, color: .secondaryLabelColor))
         if !power.isRunnerFriendly {
-            let button = NSButton(title: "Copy Sleep Fix Command", target: self, action: #selector(copyPowerFixCommand))
-            button.bezelStyle = .rounded
-            stack.addArrangedSubview(button)
+            let buttons = NSStackView()
+            buttons.orientation = .horizontal
+            buttons.spacing = 10
+            let apply = NSButton(title: t("applyPower"), target: self, action: #selector(applyPowerPolicy))
+            apply.bezelStyle = .rounded
+            let copy = NSButton(title: t("copyCommand"), target: self, action: #selector(copyPowerFixCommand))
+            copy.bezelStyle = .rounded
+            buttons.addArrangedSubview(apply)
+            buttons.addArrangedSubview(copy)
+            stack.addArrangedSubview(buttons)
         }
 
         box.contentView?.addSubview(stack)
@@ -1044,25 +1201,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         header.addArrangedSubview(statusBadge(compactSummary(snapshot), snapshot: snapshot))
         stack.addArrangedSubview(header)
 
-        stack.addArrangedSubview(textLabel("Service: \(snapshot.serviceState.rawValue)   GitHub: \(snapshot.githubStatus ?? "unknown")   Runner: \(snapshot.config.runnerName)", size: 12, color: .secondaryLabelColor))
-        stack.addArrangedSubview(textLabel("Labels: \(snapshot.labels.joined(separator: ", "))", size: 12, color: .secondaryLabelColor))
+        stack.addArrangedSubview(textLabel("\(t("service")): \(snapshot.serviceState.rawValue)   \(t("github")): \(snapshot.githubStatus ?? "unknown")   \(t("runner")): \(snapshot.config.runnerName)", size: 12, color: .secondaryLabelColor))
+        stack.addArrangedSubview(textLabel("\(t("labels")): \(snapshot.labels.joined(separator: ", "))", size: 12, color: .secondaryLabelColor))
 
         if let error = snapshot.error, !error.isEmpty {
             stack.addArrangedSubview(textLabel("GitHub error: \(error)", size: 12, color: .systemRed))
         }
 
-        stack.addArrangedSubview(sectionTitle("Current Requests"))
+        stack.addArrangedSubview(sectionTitle(t("currentRequests")))
         if snapshot.currentRuns.isEmpty {
-            stack.addArrangedSubview(textLabel("No active or queued requests for this runner.", size: 12, color: .secondaryLabelColor))
+            stack.addArrangedSubview(textLabel(t("noCurrentRequests"), size: 12, color: .secondaryLabelColor))
         } else {
             for activity in snapshot.currentRuns {
                 stack.addArrangedSubview(activityRow(activity, runnerID: snapshot.config.id))
             }
         }
 
-        stack.addArrangedSubview(sectionTitle("Recent Runner Events"))
+        stack.addArrangedSubview(sectionTitle(t("recentEvents")))
         if snapshot.recentEvents.isEmpty {
-            stack.addArrangedSubview(textLabel("No recent local runner events found.", size: 12, color: .secondaryLabelColor))
+            stack.addArrangedSubview(textLabel(t("noRecentEvents"), size: 12, color: .secondaryLabelColor))
         } else {
             for event in snapshot.recentEvents {
                 stack.addArrangedSubview(textLabel(event, size: 11, color: .secondaryLabelColor))
@@ -1084,12 +1241,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         row.addArrangedSubview(textLabel(text, size: 12, color: .labelColor))
         row.addArrangedSubview(spacer())
 
-        let open = RunActionButton(title: "Open", target: self, action: #selector(openRun(_:)))
+        let open = RunActionButton(title: t("open"), target: self, action: #selector(openRun(_:)))
         open.bezelStyle = .rounded
         open.actionRef = RunActionRef(runnerID: runnerID, runID: activity.runID, url: activity.htmlURL)
         row.addArrangedSubview(open)
 
-        let cancel = RunActionButton(title: "Cancel", target: self, action: #selector(cancelRun(_:)))
+        let cancel = RunActionButton(title: t("cancel"), target: self, action: #selector(cancelRun(_:)))
         cancel.bezelStyle = .rounded
         cancel.actionRef = RunActionRef(runnerID: runnerID, runID: activity.runID, url: activity.htmlURL)
         row.addArrangedSubview(cancel)
@@ -1292,22 +1449,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stack.orientation = .vertical
         stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.addArrangedSubview(row(label: "Display name", field: displayName, help: "Name shown inside RunnerBar. It does not affect GitHub. Empty uses the repo name."))
-        stack.addArrangedSubview(row(label: "Owner", field: owner, help: "GitHub user or organization that owns the target repository. Requires access through gh auth."))
-        stack.addArrangedSubview(row(label: "Repo", field: repo, help: "Repository where the self-hosted runner will be registered. This field is required."))
-        stack.addArrangedSubview(row(label: "Runner name", field: runnerName, help: "Exact runner name in GitHub settings. Empty auto-generates a Mac-and-repo-specific name."))
-        stack.addArrangedSubview(row(label: "Runner path", field: runnerPath, help: "Local install directory. If it ends with '/', RunnerBar appends the repo name and creates that directory."))
-        stack.addArrangedSubview(row(label: "Labels", field: labels, help: "Comma-separated workflow labels. Empty uses '<repo>-runner'. Use restrictive labels per repo."))
+        stack.addArrangedSubview(row(label: t("displayName"), field: displayName, help: t("displayNameHelp")))
+        stack.addArrangedSubview(row(label: t("owner"), field: owner, help: t("ownerHelp")))
+        stack.addArrangedSubview(row(label: t("repo"), field: repo, help: t("repoHelp")))
+        stack.addArrangedSubview(row(label: t("runnerName"), field: runnerName, help: t("runnerNameHelp")))
+        stack.addArrangedSubview(row(label: t("runnerPath"), field: runnerPath, help: t("runnerPathHelp")))
+        stack.addArrangedSubview(row(label: t("labels"), field: labels, help: t("labelsHelp")))
 
-        let info = NSTextField(labelWithString: "Owner and repo are required. Empty runner name, runner path ending in '/', and empty labels are auto-filled from the repo.")
+        let info = NSTextField(labelWithString: t("formHelp"))
         info.translatesAutoresizingMaskIntoConstraints = false
         info.lineBreakMode = .byWordWrapping
         info.maximumNumberOfLines = 3
         info.textColor = .secondaryLabelColor
 
-        let cancel = NSButton(title: "Cancel", target: nil, action: nil)
+        let cancel = NSButton(title: t("cancel"), target: nil, action: nil)
         cancel.translatesAutoresizingMaskIntoConstraints = false
-        let add = NSButton(title: "Add", target: nil, action: nil)
+        let add = NSButton(title: t("add"), target: nil, action: nil)
         add.translatesAutoresizingMaskIntoConstraints = false
         add.keyEquivalent = "\r"
         add.bezelStyle = .rounded
@@ -1430,6 +1587,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let command = "sudo pmset -c sleep 0 displaysleep 30 disksleep 0 powernap 1 womp 1"
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(command, forType: .string)
+    }
+
+    @objc private func applyPowerPolicy() {
+        let alert = NSAlert()
+        alert.messageText = "Apply runner power policy?"
+        alert.informativeText = "RunnerBar will ask macOS for administrator permission and set AC power sleep=0, displaysleep=30, disksleep=0, powernap=1, and wake-on-network=1."
+        alert.addButton(withTitle: "Apply")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        let monitor = monitor
+        updateTitle(color: .systemYellow, text: "PWR")
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = monitor.applyRunnerPowerPolicy()
+            Task { @MainActor in
+                guard let self else { return }
+                if result.status != 0 {
+                    self.updateTitleForCurrentState()
+                    self.showError("Power policy failed", detail: result.output.isEmpty ? "macOS did not apply the pmset command." : result.output)
+                }
+                self.refresh()
+            }
+        }
     }
 
     @objc private func quit() {

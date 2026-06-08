@@ -38,6 +38,8 @@ open .build/RunnerBar.app
 - Cancel active workflow runs from the dashboard.
 - See recent local runner service events from the runner log.
 - See current AC sleep policy in the dashboard.
+- Apply the recommended AC power policy from the app with a macOS administrator prompt.
+- Switch the app between English and Korean from the Settings menu.
 - Register a new GitHub repository runner from the menu bar app.
 - Add repository runners from the menu bar app.
 - Start, stop, and restart each configured runner service.
