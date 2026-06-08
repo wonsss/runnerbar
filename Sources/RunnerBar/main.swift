@@ -43,14 +43,7 @@ enum AIProvider: String, CaseIterable, Sendable {
         }
     }
 
-    var healthCommand: [String] {
-        switch self {
-        case .codex:
-            ["codex", "exec", "Say READY in one word."]
-        case .claude:
-            ["claude", "-p", "Say READY in one word.", "--max-turns", "1"]
-        }
-    }
+    var healthPrompt: String { "Say READY in one word." }
 }
 
 struct RunnerConfig: Codable, Identifiable, Sendable {
@@ -194,6 +187,11 @@ struct ShellResult: Sendable {
     var output: String
 }
 
+struct AIHealthReport: Sendable {
+    var status: String
+    var detail: String
+}
+
 struct RunnerFormFields {
     var displayName: String
     var owner: String
@@ -244,7 +242,7 @@ final class FlippedView: NSView {
 }
 
 enum Shell {
-    static func run(_ arguments: [String], cwd: String? = nil) -> ShellResult {
+    static func run(_ arguments: [String], cwd: String? = nil, unsetEnvironmentKeys: [String] = []) -> ShellResult {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = arguments
@@ -261,6 +259,9 @@ enum Shell {
         ].joined(separator: ":")
         environment["PATH"] = [environment["PATH"], fallbackPath].compactMap(\.self).joined(separator: ":")
         environment["HOME"] = home
+        for key in unsetEnvironmentKeys {
+            environment.removeValue(forKey: key)
+        }
         process.environment = environment
         if let cwd {
             process.currentDirectoryURL = URL(fileURLWithPath: cwd)
@@ -1048,21 +1049,82 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func runAIHealthCheck() {
         let providers = config.effectiveAIFallbackOrder
+        let cwd = aiHealthCheckCWD()
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let lines = providers.map { provider -> String in
-                let result = Shell.run(provider.healthCommand)
-                let ok = result.status == 0 && result.output.localizedCaseInsensitiveContains("READY")
-                let status = ok ? "OK" : "FAILED"
-                let output = result.output
-                    .split(separator: "\n")
-                    .prefix(6)
-                    .joined(separator: "\n")
-                return "\(provider.displayName): \(status)\n\(output)"
+                let report = self?.runAIHealth(provider: provider, cwd: cwd)
+                    ?? AIHealthReport(status: "FAILED", detail: "RunnerBar is not available.")
+                return "\(provider.displayName): \(report.status)\nWorking directory: \(cwd)\n\(report.detail)"
             }
             Task { @MainActor in
                 self?.showInfo("AI Health Check", detail: lines.joined(separator: "\n\n"))
             }
         }
+    }
+
+    private func aiHealthCheckCWD() -> String {
+        let fileManager = FileManager.default
+        for runner in config.runners {
+            let worktree = "\(runner.runnerPath)/_work/\(runner.repo)/\(runner.repo)"
+            if fileManager.fileExists(atPath: "\(worktree)/.git") {
+                return worktree
+            }
+        }
+        let runnerBarRepo = "/Users/marco/Documents/1-projects/runnerbar"
+        if fileManager.fileExists(atPath: "\(runnerBarRepo)/.git") {
+            return runnerBarRepo
+        }
+        return fileManager.homeDirectoryForCurrentUser.path
+    }
+
+    nonisolated private func runAIHealth(provider: AIProvider, cwd: String) -> AIHealthReport {
+        switch provider {
+        case .codex:
+            let result = runCodexHealth(provider: provider, cwd: cwd)
+            let ok = result.status == 0 && result.output.localizedCaseInsensitiveContains("READY")
+            return AIHealthReport(status: ok ? "OK" : "FAILED", detail: summarizedOutput(result.output))
+        case .claude:
+            let execution = Shell.run(
+                ["claude", "-p", provider.healthPrompt, "--max-turns", "1"],
+                cwd: cwd,
+                unsetEnvironmentKeys: ["ANTHROPIC_API_KEY", "CLAUDE_API_KEY"]
+            )
+            if execution.status == 0 && execution.output.localizedCaseInsensitiveContains("READY") {
+                return AIHealthReport(status: "OK", detail: summarizedOutput(execution.output))
+            }
+
+            let auth = Shell.run(
+                ["claude", "auth", "status"],
+                cwd: cwd,
+                unsetEnvironmentKeys: ["ANTHROPIC_API_KEY", "CLAUDE_API_KEY"]
+            )
+            if auth.status == 0 && auth.output.localizedCaseInsensitiveContains("\"loggedIn\": true") {
+                return AIHealthReport(
+                    status: "CONNECTED",
+                    detail: "Claude Code login is active. Non-interactive execution still failed:\n\(summarizedOutput(execution.output))"
+                )
+            }
+            return AIHealthReport(status: "FAILED", detail: summarizedOutput(execution.output))
+        }
+    }
+
+    nonisolated private func runCodexHealth(provider: AIProvider, cwd: String) -> ShellResult {
+        let result = Shell.run(["codex", "exec", provider.healthPrompt], cwd: cwd)
+        if result.status != 0 && result.output.localizedCaseInsensitiveContains("trusted directory") {
+            return Shell.run(["codex", "exec", "--skip-git-repo-check", provider.healthPrompt], cwd: cwd)
+        }
+        return result
+    }
+
+    nonisolated private func summarizedOutput(_ output: String) -> String {
+        let summary = output
+            .split(separator: "\n")
+            .prefix(6)
+            .joined(separator: "\n")
+        if summary.isEmpty {
+            return "(no output)"
+        }
+        return summary
     }
 
     @objc private func addRepositoryRunner() {
