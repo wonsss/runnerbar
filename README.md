@@ -34,7 +34,7 @@ open .build/RunnerBar.app
 ## Controls
 
 - Open a live dashboard for all configured repository runners.
-- See current queued/in-progress GitHub Actions requests per runner.
+- See current queued/in-progress GitHub Actions requests per runner, with the assigned runner name shown inline.
 - Cancel active workflow runs from the dashboard.
 - See recent local runner service events from the runner log.
 - See current AC sleep policy in the dashboard.
@@ -42,6 +42,9 @@ open .build/RunnerBar.app
 - Restore the default AC power policy from the app.
 - Switch the app between English and Korean from the Settings menu.
 - Select the default AI provider and fallback order for CI analysis.
+- **Watchdog (P0)**: detect offline runners and queue hangs (queued jobs whose labels match no online runner), auto-restart with exponential backoff, then notify (macOS notification + optional Slack webhook) only when recovery fails.
+- **Replicas (P1)**: scale a single repo runner entry to N parallel instances sharing the same labels, via `Scale Up / Scale Down` in the runner submenu. Each replica gets its own directory and LaunchAgent.
+- **Machine Health (P2)**: live colima/Docker indicator, disk-free % gauge with threshold warning, and a one-click cleanup sheet (runner `_work`, `docker system prune`, `supabase stop`, simulator caches).
 
 ## AI Providers
 
@@ -118,4 +121,70 @@ Choose:
 RunnerBar -> Config Settings...
 ```
 
-This updates global RunnerBar settings such as refresh interval and saves them to `~/.runnerbar/config.json`.
+This updates global RunnerBar settings and saves them to `~/.runnerbar/config.json`. The dialog exposes:
+
+- **Refresh sec** — polling interval (≥ 5).
+- **Disk warn %** — free-disk threshold below which the dashboard turns the disk gauge red.
+- **Slack webhook URL** — optional. When set, RunnerBar posts to it when the watchdog exhausts all recovery attempts.
+- **Watchdog enabled** — turn the offline/hang detector on or off.
+
+The full schema (all fields are optional except `runners`):
+
+```json
+{
+  "language": "en",
+  "refreshIntervalSeconds": 20,
+  "defaultAIProvider": "codex",
+  "aiProviderFallbackOrder": ["codex", "claude"],
+  "slackWebhookURL": null,
+  "diskWarnThresholdPercent": 15,
+  "watchdog": {
+    "enabled": true,
+    "recoveryAttempts": 3,
+    "recoveryBaseDelaySeconds": 8,
+    "autoStartColima": true
+  },
+  "runners": [
+    {
+      "id": "reading-crew",
+      "displayName": "Reading Crew",
+      "owner": "wonsss",
+      "repo": "reading-crew",
+      "runnerName": "macbook-air-ai-analyzer",
+      "runnerPath": "/Users/marco/actions-runner-readingcrew",
+      "labels": ["readingcrew-ai-analyzer"],
+      "replicas": 1
+    }
+  ]
+}
+```
+
+### Replicas
+
+Set `"replicas": N` on a runner entry (or use **Scale Up / Scale Down** in the runner submenu) to run N parallel instances of the same runner sharing the same labels. RunnerBar derives instance directories by suffix:
+
+```
+/Users/marco/actions-runner-readingcrew      # instance #1
+/Users/marco/actions-runner-readingcrew-2    # instance #2
+/Users/marco/actions-runner-readingcrew-3    # instance #3
+```
+
+Runner names are derived the same way (`<runnerName>-2`, `<runnerName>-3`). Each replica is registered with its own GitHub runner record and LaunchAgent. The dashboard groups replicas under a single Label Group card showing `online / total` and `busy`.
+
+### Watchdog
+
+The watchdog runs on each refresh tick. It detects:
+
+1. **Offline runner** — a configured runner instance whose local service is not `Started` or whose GitHub status is not `online`.
+2. **Queue hang** — a repo has GitHub Actions jobs `queued` whose `labels` match no currently online runner instance in that repo.
+
+When either condition is detected, the watchdog tries `svc.sh restart` (and optionally `colima start`) for each affected instance with exponential backoff (`recoveryBaseDelaySeconds * 2^(attempt-1)`). Only after `recoveryAttempts` consecutive failures does it raise a macOS notification and POST to the Slack webhook. All attempts and outcomes are visible in the dashboard's **Watchdog Log** card.
+
+### Machine Health
+
+The dashboard's **Machine Health** card shows:
+
+- **Disk** free GB / total GB and a progress bar. Turns red when free % is below `diskWarnThresholdPercent`.
+- **Colima** running/stopped/not-installed, with Start/Stop buttons.
+- **Docker** running/stopped status.
+- **Clean Up...** opens a sheet that can run, in any combination: clean each stopped instance's `_work/_temp`, `_work/_tool`, and `node_modules`; `docker system prune -af --volumes`; `supabase stop`; `xcrun simctl delete unavailable`.

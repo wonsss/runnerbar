@@ -3,6 +3,14 @@
   "refreshIntervalSeconds": 20,
   "defaultAIProvider": "codex",
   "aiProviderFallbackOrder": ["codex", "claude"],
+  "slackWebhookURL": null,
+  "diskWarnThresholdPercent": 15,
+  "watchdog": {
+    "enabled": true,
+    "recoveryAttempts": 3,
+    "recoveryBaseDelaySeconds": 8,
+    "autoStartColima": true
+  },
   "runners": [
     {
       "id": "reading-crew",
@@ -11,7 +19,8 @@
       "repo": "reading-crew",
       "runnerName": "macbook-air-ai-analyzer",
       "runnerPath": "/Users/marco/actions-runner-readingcrew",
-      "labels": ["readingcrew-ai-analyzer"]
+      "labels": ["readingcrew-ai-analyzer"],
+      "replicas": 1
     }
   ]
 }
