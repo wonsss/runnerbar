@@ -9,6 +9,8 @@ struct MonitorReport: Sendable {
 
 final class RunnerMonitor: @unchecked Sendable {
     private let configURL: URL
+    /// Supervises `gui`-mode runners (child processes in RunnerBar's GUI session).
+    let guiSupervisor = GUIRunnerSupervisor.shared
 
     init() {
         let home = FileManager.default.homeDirectoryForCurrentUser
@@ -64,7 +66,9 @@ final class RunnerMonitor: @unchecked Sendable {
             }
 
             for instance in runner.instances() {
-                let service = serviceState(at: instance.runnerPath)
+                let service = instance.isGUI
+                    ? guiSupervisor.state(instance)
+                    : serviceState(at: instance.runnerPath)
                 let github = ghRunnersByRepo[repoKey]?.first { $0.name == instance.runnerName }
                 let err = ghRunnersError[repoKey]
                 snapshots.append(
@@ -121,14 +125,23 @@ final class RunnerMonitor: @unchecked Sendable {
     // MARK: - Per-instance lifecycle
 
     func startInstance(_ instance: RunnerInstance) -> ShellResult {
-        Shell.run(["./svc.sh", "start"], cwd: instance.runnerPath)
+        if instance.isGUI {
+            return guiSupervisor.start(instance)
+        }
+        return Shell.run(["./svc.sh", "start"], cwd: instance.runnerPath)
     }
 
     func stopInstance(_ instance: RunnerInstance) -> ShellResult {
-        Shell.run(["./svc.sh", "stop"], cwd: instance.runnerPath)
+        if instance.isGUI {
+            return guiSupervisor.stop(instance)
+        }
+        return Shell.run(["./svc.sh", "stop"], cwd: instance.runnerPath)
     }
 
     func restartInstance(_ instance: RunnerInstance) -> ShellResult {
+        if instance.isGUI {
+            return guiSupervisor.restart(instance)
+        }
         _ = stopInstance(instance)
         return startInstance(instance)
     }

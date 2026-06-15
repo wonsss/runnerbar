@@ -75,6 +75,19 @@ enum AIProvider: String, CaseIterable, Sendable {
     var healthPrompt: String { "Say READY in one word." }
 }
 
+/// How RunnerBar starts/supervises a runner.
+/// - `service`: GitHub's `svc.sh` LaunchAgent. Robust & independent, but runs in a
+///   background launchd session (no GUI/Aqua session) — iOS Simulator / UI test jobs
+///   fail there (e.g. New Architecture TurboModule registration breaks → app crashes
+///   with "RNGoogleSignin could not be found").
+/// - `gui`: RunnerBar launches `./run.sh` as its own child process, so the runner
+///   inherits RunnerBar's GUI (Aqua) session — required for Simulator/UI tests.
+///   Trade-off: the runner is tied to RunnerBar's lifecycle (stops when RunnerBar quits).
+enum RunnerMode: String, Codable, Sendable {
+    case service
+    case gui
+}
+
 struct RunnerConfig: Codable, Identifiable, Sendable {
     var id: String
     var displayName: String
@@ -84,8 +97,12 @@ struct RunnerConfig: Codable, Identifiable, Sendable {
     var runnerPath: String
     var labels: [String]
     var replicas: Int?
+    /// "service" (default) or "gui". See `RunnerMode`.
+    var mode: String?
 
     var instanceCount: Int { max(1, replicas ?? 1) }
+
+    var effectiveMode: RunnerMode { RunnerMode(rawValue: mode ?? "") ?? .service }
 
     func instances() -> [RunnerInstance] {
         (1...instanceCount).map { index in
@@ -97,7 +114,8 @@ struct RunnerConfig: Codable, Identifiable, Sendable {
                 repo: repo,
                 runnerName: Self.derivedRunnerName(base: runnerName, index: index),
                 runnerPath: Self.derivedRunnerPath(base: runnerPath, index: index),
-                labels: labels
+                labels: labels,
+                mode: effectiveMode
             )
         }
     }
@@ -120,6 +138,8 @@ struct RunnerInstance: Sendable, Hashable {
     var runnerName: String
     var runnerPath: String
     var labels: [String]
+    var mode: RunnerMode = .service
 
     var instanceID: String { "\(parentID)#\(index)" }
+    var isGUI: Bool { mode == .gui }
 }
