@@ -36,6 +36,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.refresh()
             }
         }
+        startGUIRunnersIfNeeded()
+    }
+
+    /// `gui`-mode runners must be children of RunnerBar (this GUI/Aqua session) to run
+    /// Simulator/UI jobs. Bring them up on launch; `applicationWillTerminate` stops them.
+    private func startGUIRunnersIfNeeded() {
+        let guiRunners = config.runners.filter { $0.effectiveMode == .gui }
+        guard !guiRunners.isEmpty else { return }
+        let monitor = self.monitor
+        DispatchQueue.global(qos: .utility).async {
+            for runner in guiRunners {
+                for instance in runner.instances() {
+                    _ = monitor.startInstance(instance)
+                }
+            }
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        // gui-mode runners are our children — stop them cleanly so jobs aren't left orphaned.
+        monitor.guiSupervisor.stopAllTracked()
     }
 
     private func configureStatusItem() {

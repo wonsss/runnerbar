@@ -20,7 +20,8 @@
       "runnerName": "macbook-air-ai-analyzer",
       "runnerPath": "/Users/marco/actions-runner-readingcrew",
       "labels": ["readingcrew-ai-analyzer"],
-      "replicas": 1
+      "replicas": 1,
+      "mode": "gui"
     }
   ]
 }

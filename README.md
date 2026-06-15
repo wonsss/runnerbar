@@ -17,6 +17,33 @@ Each runner should have its own directory, for example:
 ~/actions-runners/other-repo
 ```
 
+## Runner modes — `service` vs `gui`
+
+Each runner entry takes an optional `"mode"`:
+
+| mode | how it runs | use when |
+|------|-------------|----------|
+| `"service"` (default) | GitHub's `svc.sh` LaunchAgent | normal CI; robust & independent of RunnerBar |
+| `"gui"` | RunnerBar launches `./run.sh` as its **own child process** | jobs that drive the **iOS Simulator / UI** (Maestro, `xcrun simctl`, dev-client) |
+
+Why `gui` matters: RunnerBar is a menu-bar app, so it runs in the logged-in **GUI (Aqua) session**. A child process it spawns inherits that session. A `svc.sh` LaunchAgent instead runs in a **background launchd session with no GUI** — there, Simulator apps mis-initialize (e.g. React Native New Architecture TurboModules fail to register → the app crashes with `'RNGoogleSignin' could not be found`), so simulator smoke/E2E jobs always fail. Running the runner as a RunnerBar child fixes this.
+
+```jsonc
+{
+  "id": "reading-crew",
+  "runnerName": "macbook-air-ai-analyzer",
+  "runnerPath": "/Users/marco/actions-runner-readingcrew",
+  "labels": ["readingcrew-ai-analyzer"],
+  "replicas": 4,
+  "mode": "gui"          // all 4 replicas run as RunnerBar children in the GUI session
+}
+```
+
+Trade-off & requirements for `gui` mode:
+- The runner is tied to RunnerBar's lifecycle — it **stops when RunnerBar quits** (RunnerBar stops them cleanly via SIGINT on exit). For unattended operation, enable **auto-login** so RunnerBar (its login agent) starts in the GUI session after a reboot.
+- Keep the Mac awake and **don't let the screen lock** (a locked Aqua session blocks Simulator UI). RunnerBar already manages the AC power policy from the dashboard.
+- Replicas are supported: every replica of a `gui` runner is launched as its own child (per-instance log at `<runnerPath>/_diag/runnerbar-gui.log`).
+
 ## Setup
 
 ```bash
