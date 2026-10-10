@@ -85,8 +85,13 @@ for i in $(seq 1 "$REPLICAS"); do
 
   # LaunchAgent (svc.sh) runners inherit launchd's minimal PATH — pin one that
   # covers Homebrew and standard dirs so workflow steps can find gh/rg/etc.
-  cat > .env <<'ENV'
+  # Toolcache: setup-node/python/... try the hosted image's /Users/runner
+  # path when AGENT_TOOLSDIRECTORY is unset → point all instances at one
+  # writable shared cache directory instead.
+  cat > .env <<ENV
 PATH=/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+AGENT_TOOLSDIRECTORY=$HOME/actions-runners/_toolcache
+RUNNER_TOOL_CACHE=$HOME/actions-runners/_toolcache
 ENV
 
   if [ ! -f .runner ]; then
