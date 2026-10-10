@@ -51,6 +51,51 @@ cp config/config.example.json ~/.runnerbar/config.json
 swift run RunnerBar
 ```
 
+## Headless registration (multi-repo onboarding)
+
+`scripts/register-repo-runner.sh` performs the same steps as
+`Register New GitHub Runner...` non-interactively — useful when onboarding
+several repositories or when an agent/SSH session drives the setup:
+
+```bash
+scripts/register-repo-runner.sh \
+  --repo owner/name \
+  --labels <repo>-runner \
+  --replicas 3 \
+  --mode service        # or gui for jobs that need the iOS Simulator
+```
+
+It downloads the latest macOS arm64 runner, registers one instance per
+replica (directories `<dir>`, `<dir>-2`, …), writes each instance's `.env`
+with a Homebrew-aware `PATH` (LaunchAgent sessions otherwise get launchd's
+minimal PATH and steps cannot find `gh`, `rg`, …), installs `svc.sh`
+LaunchAgents in `service` mode, and merges the entry into
+`~/.runnerbar/config.json`. If RunnerBar is running while the script runs,
+restart it so it reloads the config.
+
+To have workflows pick runners per environment instead of per workflow, point
+`runs-on` at a repo variable, e.g. `runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}`,
+and set `CI_RUNNER` to the registered label to move jobs onto this Mac.
+
+## Dedicated runner machine
+
+To put the runners on a second Mac instead of this one:
+
+1. Copy `.build/RunnerBar.app` (built by `scripts/build-app.sh`) to that Mac —
+   or clone this repo there and build locally. Unsigned app: allow it in
+   System Settings → Privacy & Security on first launch.
+2. On that Mac, `gh auth login` with an account that can admin the target
+   repos, then either launch RunnerBar and use
+   `Register New GitHub Runner...`, or copy
+   `scripts/register-repo-runner.sh` and run it per repo — it only needs
+   `gh`, `curl`, and `/usr/bin/python3`.
+3. Keep the Mac on AC, disable display sleep while jobs run, and enable
+   auto-login + the RunnerBar login agent (`scripts/install-login-agent.sh`)
+   if it must survive reboots — `gui`-mode runners and the dashboard die with
+   the login session otherwise.
+4. Set the repo's runner variable (e.g. `CI_RUNNER`) to the registered label —
+   jobs then route to the new machine without touching workflows again.
+
 ## Build App Bundle
 
 ```bash

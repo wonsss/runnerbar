@@ -222,6 +222,12 @@ final class RunnerMonitor: @unchecked Sendable {
           --work _work \
           --unattended
 
+        # LaunchAgent runners inherit launchd's minimal PATH — pin one that
+        # covers Homebrew so workflow steps can find gh/rg/etc.
+        cat > .env <<'ENV'
+        PATH=/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+        ENV
+
         ./svc.sh install
         ./svc.sh start
         ./svc.sh status
@@ -572,18 +578,7 @@ final class RunnerMonitor: @unchecked Sendable {
             defaultAIProvider: AIProvider.codex.rawValue,
             aiProviderFallbackOrder: AIProvider.allCases.map(\.rawValue),
             refreshIntervalSeconds: 20,
-            runners: [
-                RunnerConfig(
-                    id: "reading-crew",
-                    displayName: "Reading Crew",
-                    owner: "wonsss",
-                    repo: "reading-crew",
-                    runnerName: "macbook-air-ai-analyzer",
-                    runnerPath: "/Users/marco/actions-runner-readingcrew",
-                    labels: ["readingcrew-ai-analyzer"],
-                    replicas: 1
-                )
-            ],
+            runners: [],
             slackWebhookURL: nil,
             watchdog: WatchdogConfig.defaults,
             diskWarnThresholdPercent: 15
