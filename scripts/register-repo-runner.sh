@@ -88,11 +88,15 @@ for i in $(seq 1 "$REPLICAS"); do
   # Toolcache: setup-node/python/... try the hosted image's /Users/runner
   # path when AGENT_TOOLSDIRECTORY is unset → point all instances at one
   # writable shared cache directory instead.
+  # PNPM_HOME: replicas racing on one shared store hit ENOTEMPTY under
+  # concurrent installs — give each instance its own home+store.
   cat > .env <<ENV
 PATH=/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 AGENT_TOOLSDIRECTORY=$HOME/actions-runners/_toolcache
 RUNNER_TOOL_CACHE=$HOME/actions-runners/_toolcache
+PNPM_HOME=$DIR/tools/pnpm
 ENV
+  mkdir -p "$DIR/tools/pnpm"
 
   if [ ! -f .runner ]; then
     TOKEN="$(gh api -X POST "repos/$OWNER/$REPO_NAME/actions/runners/registration-token" --jq .token)"

@@ -226,11 +226,15 @@ final class RunnerMonitor: @unchecked Sendable {
         # covers Homebrew so workflow steps can find gh/rg/etc. Point the
         # setup-* toolcache at a writable shared dir — otherwise it tries the
         # hosted image's /Users/runner path and fails with Permission denied.
+        # PNPM_HOME is per-instance: replicas sharing one store hit ENOTEMPTY
+        # under concurrent installs.
         cat > .env <<ENV
         PATH=/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
         AGENT_TOOLSDIRECTORY=$HOME/actions-runners/_toolcache
         RUNNER_TOOL_CACHE=$HOME/actions-runners/_toolcache
+        PNPM_HOME=$RUNNER_DIR/tools/pnpm
         ENV
+        mkdir -p "$RUNNER_DIR/tools/pnpm"
 
         ./svc.sh install
         ./svc.sh start
