@@ -58,6 +58,7 @@ LABELS="${LABELS:-${REPO_NAME}-runner}"
 BASE_DIR="${BASE_DIR:-$HOME/actions-runners/$REPO_NAME}"
 
 echo "==> $REPO: $REPLICAS instance(s) of '$NAME' [$LABELS] mode=$MODE"
+BASE_NAME="$NAME"
 
 for i in $(seq 1 "$REPLICAS"); do
   if [ "$i" -eq 1 ]; then
@@ -105,12 +106,26 @@ ENV
     echo "    already configured (.runner exists) — skipping config.sh"
   fi
 
+  # 등록된 러너의 실제 이름은 .runner의 agentName이 정본이다 — --name 기본값과
+  # 기존 등록이 어긋나도 서비스·config를 실제 이름으로 맞춘다. (BOM 주의)
+  ACTUAL_NAME="$(/usr/bin/python3 -c \
+    'import json; print(json.load(open(".runner", encoding="utf-8-sig"))["agentName"])' \
+    2>/dev/null || true)"
+  [ -z "$ACTUAL_NAME" ] && ACTUAL_NAME="$RNAME"
+  if [ "$i" -eq 1 ]; then
+    BASE_NAME="$ACTUAL_NAME"
+  fi
+
   if [ "$MODE" = "service" ]; then
-    ./svc.sh install
+    PLIST="$HOME/Library/LaunchAgents/actions.runner.$OWNER-$REPO_NAME.$ACTUAL_NAME.plist"
+    if [ -f "$PLIST" ]; then
+      echo "    service already installed ($ACTUAL_NAME) — skipping svc.sh install"
+    else
+      ./svc.sh install
+    fi
     # setup-python 계열의 toolcache는 러너가 잡마다 자기 기본값(hosted 이미지의
     # /Users/runner/...)을 강제로 export하므로 .env/step env로 못 바꾼다 —
     # 리스너 프로세스의 환경, 즉 LaunchAgent plist에 RUNNER_TOOL_CACHE를 박는다.
-    PLIST="$HOME/Library/LaunchAgents/actions.runner.$OWNER-$REPO_NAME.$RNAME.plist"
     if [ -f "$PLIST" ]; then
       plutil -insert EnvironmentVariables.RUNNER_TOOL_CACHE -string "$HOME/actions-runners/_toolcache" "$PLIST" 2>/dev/null \
         || plutil -replace EnvironmentVariables.RUNNER_TOOL_CACHE -string "$HOME/actions-runners/_toolcache" "$PLIST"
@@ -126,7 +141,7 @@ ENV
 done
 
 # Merge the entry into ~/.runnerbar/config.json so the app manages it too.
-/usr/bin/python3 - "$CONFIG_PATH" "$REPO_NAME" "$OWNER" "$NAME" "$BASE_DIR" "$LABELS" "$REPLICAS" "$MODE" <<'PY'
+/usr/bin/python3 - "$CONFIG_PATH" "$REPO_NAME" "$OWNER" "$BASE_NAME" "$BASE_DIR" "$LABELS" "$REPLICAS" "$MODE" <<'PY'
 import json, sys
 
 path, repo, owner, name, base_dir, labels, replicas, mode = sys.argv[1:9]
