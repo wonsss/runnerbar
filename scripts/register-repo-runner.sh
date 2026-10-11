@@ -85,18 +85,12 @@ for i in $(seq 1 "$REPLICAS"); do
 
   # LaunchAgent (svc.sh) runners inherit launchd's minimal PATH — pin one that
   # covers Homebrew and standard dirs so workflow steps can find gh/rg/etc.
-  # Toolcache: setup-node/python/... try the hosted image's /Users/runner
-  # path when AGENT_TOOLSDIRECTORY is unset → point all instances at one
-  # writable shared cache directory instead.
-  # PNPM_HOME: replicas racing on one shared store hit ENOTEMPTY under
-  # concurrent installs — give each instance its own home+store.
+  # NOTE: AGENT_TOOLSDIRECTORY/RUNNER_TOOL_CACHE/PNPM_HOME do NOT work here —
+  # the runner exports its own reserved values for every job, overriding .env.
+  # Toolcache relocation must go through the LaunchAgent plist (below).
   cat > .env <<ENV
 PATH=/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
-AGENT_TOOLSDIRECTORY=$HOME/actions-runners/_toolcache
-RUNNER_TOOL_CACHE=$HOME/actions-runners/_toolcache
-PNPM_HOME=$DIR/tools/pnpm
 ENV
-  mkdir -p "$DIR/tools/pnpm"
 
   if [ ! -f .runner ]; then
     TOKEN="$(gh api -X POST "repos/$OWNER/$REPO_NAME/actions/runners/registration-token" --jq .token)"
@@ -113,6 +107,19 @@ ENV
 
   if [ "$MODE" = "service" ]; then
     ./svc.sh install
+    # setup-python 계열의 toolcache는 러너가 잡마다 자기 기본값(hosted 이미지의
+    # /Users/runner/...)을 강제로 export하므로 .env/step env로 못 바꾼다 —
+    # 리스너 프로세스의 환경, 즉 LaunchAgent plist에 RUNNER_TOOL_CACHE를 박는다.
+    PLIST="$HOME/Library/LaunchAgents/actions.runner.$OWNER-$REPO_NAME.$RNAME.plist"
+    if [ -f "$PLIST" ]; then
+      plutil -insert EnvironmentVariables.RUNNER_TOOL_CACHE -string "$HOME/actions-runners/_toolcache" "$PLIST" 2>/dev/null \
+        || plutil -replace EnvironmentVariables.RUNNER_TOOL_CACHE -string "$HOME/actions-runners/_toolcache" "$PLIST"
+      plutil -insert EnvironmentVariables.AGENT_TOOLSDIRECTORY -string "$HOME/actions-runners/_toolcache" "$PLIST" 2>/dev/null \
+        || plutil -replace EnvironmentVariables.AGENT_TOOLSDIRECTORY -string "$HOME/actions-runners/_toolcache" "$PLIST"
+    else
+      echo "    warning: LaunchAgent plist not found at $PLIST — toolcache will use runner default" >&2
+    fi
+    mkdir -p "$HOME/actions-runners/_toolcache"
     ./svc.sh start
     ./svc.sh status
   fi

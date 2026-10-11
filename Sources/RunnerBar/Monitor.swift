@@ -223,20 +223,27 @@ final class RunnerMonitor: @unchecked Sendable {
           --unattended
 
         # LaunchAgent runners inherit launchd's minimal PATH — pin one that
-        # covers Homebrew so workflow steps can find gh/rg/etc. Point the
-        # setup-* toolcache at a writable shared dir — otherwise it tries the
-        # hosted image's /Users/runner path and fails with Permission denied.
-        # PNPM_HOME is per-instance: replicas sharing one store hit ENOTEMPTY
-        # under concurrent installs.
+        # covers Homebrew so workflow steps can find gh/rg/etc.
         cat > .env <<ENV
         PATH=/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
-        AGENT_TOOLSDIRECTORY=$HOME/actions-runners/_toolcache
-        RUNNER_TOOL_CACHE=$HOME/actions-runners/_toolcache
-        PNPM_HOME=$RUNNER_DIR/tools/pnpm
         ENV
-        mkdir -p "$RUNNER_DIR/tools/pnpm"
 
         ./svc.sh install
+
+        # setup-* actions' toolcache is a runner-managed env that overrides
+        # .env and step env — inject RUNNER_TOOL_CACHE into the LaunchAgent
+        # plist so the listener itself exports a writable shared location
+        # (the default resolves to the hosted image's /Users/runner path and
+        # fails with Permission denied).
+        PLIST="$HOME/Library/LaunchAgents/actions.runner.$OWNER-$REPO.$RUNNER_NAME.plist"
+        if [ -f "$PLIST" ]; then
+          plutil -insert EnvironmentVariables.RUNNER_TOOL_CACHE -string "$HOME/actions-runners/_toolcache" "$PLIST" 2>/dev/null \
+            || plutil -replace EnvironmentVariables.RUNNER_TOOL_CACHE -string "$HOME/actions-runners/_toolcache" "$PLIST"
+          plutil -insert EnvironmentVariables.AGENT_TOOLSDIRECTORY -string "$HOME/actions-runners/_toolcache" "$PLIST" 2>/dev/null \
+            || plutil -replace EnvironmentVariables.AGENT_TOOLSDIRECTORY -string "$HOME/actions-runners/_toolcache" "$PLIST"
+        fi
+        mkdir -p "$HOME/actions-runners/_toolcache"
+
         ./svc.sh start
         ./svc.sh status
         """
