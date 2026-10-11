@@ -123,10 +123,16 @@ ENV
     else
       ./svc.sh install
     fi
+    # 로그인 항목 표시명은 ProgramArguments[0]의 파일명이다 — runsvc.sh 그대로면
+    # 러너가 전부 같은 이름으로 보이므로 <repo>-runner-<i>.sh 래퍼로 가리킨다.
+    SVC_WRAPPER="$DIR/${REPO_NAME}-runner-${i}.sh"
+    printf '#!/bin/bash\nexec "$(dirname "$0")/runsvc.sh"\n' > "$SVC_WRAPPER"
+    chmod +x "$SVC_WRAPPER"
     # setup-python 계열의 toolcache는 러너가 잡마다 자기 기본값(hosted 이미지의
     # /Users/runner/...)을 강제로 export하므로 .env/step env로 못 바꾼다 —
     # 리스너 프로세스의 환경, 즉 LaunchAgent plist에 RUNNER_TOOL_CACHE를 박는다.
     if [ -f "$PLIST" ]; then
+      plutil -replace ProgramArguments.0 -string "$SVC_WRAPPER" "$PLIST"
       plutil -insert EnvironmentVariables.RUNNER_TOOL_CACHE -string "$HOME/actions-runners/_toolcache" "$PLIST" 2>/dev/null \
         || plutil -replace EnvironmentVariables.RUNNER_TOOL_CACHE -string "$HOME/actions-runners/_toolcache" "$PLIST"
       plutil -insert EnvironmentVariables.AGENT_TOOLSDIRECTORY -string "$HOME/actions-runners/_toolcache" "$PLIST" 2>/dev/null \
