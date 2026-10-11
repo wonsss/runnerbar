@@ -145,10 +145,12 @@ try:
     with open(path, "r", encoding="utf-8") as f:
         config = json.load(f)
 except FileNotFoundError:
-    config = {"runners": []}
+    config = {}
 runners = [r for r in config.get("runners", []) if r.get("id") != repo]
 runners.append(entry)
 config["runners"] = runners
+# 앱의 필수 키 — 없으면 구버전 디코드가 실패해 설정 전체를 무시한다.
+config.setdefault("refreshIntervalSeconds", 20)
 import os
 os.makedirs(os.path.dirname(path), exist_ok=True)
 with open(path, "w", encoding="utf-8") as f:

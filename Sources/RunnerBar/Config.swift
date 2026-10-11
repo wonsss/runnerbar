@@ -10,6 +10,40 @@ struct RunnerBarConfig: Codable, Sendable {
     var watchdog: WatchdogConfig?
     var diskWarnThresholdPercent: Int?
 
+    // 설정을 스크립트·수동으로 편집할 때 선택 키가 빠져도 전체 디코드가
+    // 실패해 defaultConfig로 폴백하는 일이 없게 누락 키는 기본값으로 채운다.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        language = try c.decodeIfPresent(String.self, forKey: .language)
+        defaultAIProvider = try c.decodeIfPresent(String.self, forKey: .defaultAIProvider)
+        aiProviderFallbackOrder = try c.decodeIfPresent([String].self, forKey: .aiProviderFallbackOrder)
+        refreshIntervalSeconds = try c.decodeIfPresent(TimeInterval.self, forKey: .refreshIntervalSeconds) ?? 20
+        runners = try c.decodeIfPresent([RunnerConfig].self, forKey: .runners) ?? []
+        slackWebhookURL = try c.decodeIfPresent(String.self, forKey: .slackWebhookURL)
+        watchdog = try c.decodeIfPresent(WatchdogConfig.self, forKey: .watchdog)
+        diskWarnThresholdPercent = try c.decodeIfPresent(Int.self, forKey: .diskWarnThresholdPercent)
+    }
+
+    init(
+        language: String? = nil,
+        defaultAIProvider: String? = nil,
+        aiProviderFallbackOrder: [String]? = nil,
+        refreshIntervalSeconds: TimeInterval,
+        runners: [RunnerConfig],
+        slackWebhookURL: String? = nil,
+        watchdog: WatchdogConfig? = nil,
+        diskWarnThresholdPercent: Int? = nil
+    ) {
+        self.language = language
+        self.defaultAIProvider = defaultAIProvider
+        self.aiProviderFallbackOrder = aiProviderFallbackOrder
+        self.refreshIntervalSeconds = refreshIntervalSeconds
+        self.runners = runners
+        self.slackWebhookURL = slackWebhookURL
+        self.watchdog = watchdog
+        self.diskWarnThresholdPercent = diskWarnThresholdPercent
+    }
+
     var appLanguage: AppLanguage {
         AppLanguage(rawValue: language ?? "") ?? .english
     }
