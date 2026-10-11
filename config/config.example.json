@@ -13,13 +13,13 @@
   },
   "runners": [
     {
-      "id": "reading-crew",
-      "displayName": "Reading Crew",
-      "owner": "wonsss",
-      "repo": "reading-crew",
-      "runnerName": "macbook-air-ai-analyzer",
-      "runnerPath": "/Users/marco/actions-runner-readingcrew",
-      "labels": ["readingcrew-ai-analyzer"],
+      "id": "my-repo",
+      "displayName": "My Project",
+      "owner": "your-org",
+      "repo": "my-repo",
+      "runnerName": "macbook-ci-runner",
+      "runnerPath": "/Users/you/actions-runners/my-repo",
+      "labels": ["my-repo-runner"],
       "replicas": 1,
       "mode": "gui"
     }

@@ -13,7 +13,7 @@ RunnerBar is repo-aware and runner-directory-aware. Add one entry per repository
 Each runner should have its own directory, for example:
 
 ```text
-~/actions-runners/reading-crew
+~/actions-runners/my-repo
 ~/actions-runners/other-repo
 ```
 
@@ -30,10 +30,10 @@ Why `gui` matters: RunnerBar is a menu-bar app, so it runs in the logged-in **GU
 
 ```jsonc
 {
-  "id": "reading-crew",
-  "runnerName": "macbook-air-ai-analyzer",
-  "runnerPath": "/Users/marco/actions-runner-readingcrew",
-  "labels": ["readingcrew-ai-analyzer"],
+  "id": "my-repo",
+  "runnerName": "macbook-ci-runner",
+  "runnerPath": "/Users/you/actions-runners/my-repo",
+  "labels": ["my-repo-runner"],
   "replicas": 4,
   "mode": "gui"          // all 4 replicas run as RunnerBar children in the GUI session
 }
@@ -218,13 +218,13 @@ The full schema (all fields are optional except `runners`):
   },
   "runners": [
     {
-      "id": "reading-crew",
-      "displayName": "Reading Crew",
-      "owner": "wonsss",
-      "repo": "reading-crew",
-      "runnerName": "macbook-air-ai-analyzer",
-      "runnerPath": "/Users/marco/actions-runner-readingcrew",
-      "labels": ["readingcrew-ai-analyzer"],
+      "id": "my-repo",
+      "displayName": "My Project",
+      "owner": "your-org",
+      "repo": "my-repo",
+      "runnerName": "macbook-ci-runner",
+      "runnerPath": "/Users/you/actions-runners/my-repo",
+      "labels": ["my-repo-runner"],
       "replicas": 1
     }
   ]
@@ -236,9 +236,9 @@ The full schema (all fields are optional except `runners`):
 Set `"replicas": N` on a runner entry (or use **Scale Up / Scale Down** in the runner submenu) to run N parallel instances of the same runner sharing the same labels. RunnerBar derives instance directories by suffix:
 
 ```
-/Users/marco/actions-runner-readingcrew      # instance #1
-/Users/marco/actions-runner-readingcrew-2    # instance #2
-/Users/marco/actions-runner-readingcrew-3    # instance #3
+/Users/you/actions-runners/my-repo      # instance #1
+/Users/you/actions-runners/my-repo-2    # instance #2
+/Users/you/actions-runners/my-repo-3    # instance #3
 ```
 
 Runner names are derived the same way (`<runnerName>-2`, `<runnerName>-3`). Each replica is registered with its own GitHub runner record and LaunchAgent. The dashboard groups replicas under a single Label Group card showing `online / total` and `busy`.

@@ -363,9 +363,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return worktree
             }
         }
-        let runnerBarRepo = "/Users/marco/Documents/1-projects/runnerbar"
-        if fileManager.fileExists(atPath: "\(runnerBarRepo)/.git") {
-            return runnerBarRepo
+        for candidate in ["runnerbar", "tools/runnerbar", "Documents/runnerbar"] {
+            let path = fileManager.homeDirectoryForCurrentUser.appendingPathComponent(candidate).path
+            if fileManager.fileExists(atPath: "\(path)/.git") {
+                return path
+            }
         }
         return fileManager.homeDirectoryForCurrentUser.path
     }
@@ -509,13 +511,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func registerRepositoryRunner() {
-        let defaultOwner = currentGitHubLogin() ?? "wonsss"
+        let defaultRunnerDir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("actions-runners").path + "/"
         let fields = RunnerFormFields(
             displayName: "",
-            owner: defaultOwner,
+            owner: currentGitHubLogin() ?? "",
             repo: "",
             runnerName: "",
-            runnerPath: "/Users/marco/actions-runners/",
+            runnerPath: defaultRunnerDir,
             labels: ""
         )
         guard let values = showRunnerForm(title: t("registerRunner"), fields: fields) else {
@@ -1097,18 +1100,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             options: [.anchored]
         )
         guard !repoID.isEmpty else { return homeExpanded }
-        if homeExpanded.hasSuffix("/") || homeExpanded == "/Users/marco/actions-runners" {
+        let defaultRunnerDir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("actions-runners").path
+        if homeExpanded.hasSuffix("/") || homeExpanded == defaultRunnerDir {
             return URL(fileURLWithPath: homeExpanded).appendingPathComponent(repoID).path
         }
         return homeExpanded
     }
 
     private func showRunnerForm(title: String, fields: RunnerFormFields) -> RunnerFormFields? {
-        let displayName = inputField(fields.displayName, placeholder: "Reading Crew")
-        let owner = inputField(fields.owner, placeholder: "wonsss")
-        let repo = inputField(fields.repo, placeholder: "reading-crew")
+        let displayName = inputField(fields.displayName, placeholder: "My Project")
+        let owner = inputField(fields.owner, placeholder: "your-org")
+        let repo = inputField(fields.repo, placeholder: "your-repo")
         let runnerName = inputField(fields.runnerName, placeholder: "auto: macbook-air-<repo>-runner")
-        let runnerPath = inputField(fields.runnerPath, placeholder: "/Users/marco/actions-runners/")
+        let runnerPath = inputField(fields.runnerPath, placeholder: "~/actions-runners/")
         let labels = inputField(fields.labels, placeholder: "auto: <repo>-runner")
 
         let window = NSWindow(
