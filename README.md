@@ -9,7 +9,7 @@ repository you register, lets you start/stop/restart them, auto-recovers them
 when they go offline or jobs hang in the queue, and keeps an eye on machine
 health (disk, colima/Docker, AC power policy).
 
-<!-- TODO: add a screenshot of the dashboard popover, e.g. docs/screenshot.png -->
+![RunnerBar dashboard](docs/screenshot.png)
 
 ## Features
 
