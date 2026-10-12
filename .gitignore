@@ -3,4 +3,7 @@
 .DS_Store
 *.xcuserstate
 DerivedData/
+*.app
+*.dmg
+*.zip
 Resources/RunnerBar.iconset/

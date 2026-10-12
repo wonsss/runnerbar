@@ -10,8 +10,9 @@ struct RunnerBarConfig: Codable, Sendable {
     var watchdog: WatchdogConfig?
     var diskWarnThresholdPercent: Int?
 
-    // 설정을 스크립트·수동으로 편집할 때 선택 키가 빠져도 전체 디코드가
-    // 실패해 defaultConfig로 폴백하는 일이 없게 누락 키는 기본값으로 채운다.
+    // When the config is edited by hand or by scripts, missing optional keys
+    // must not fail the whole decode and fall back to defaultConfig — fill
+    // defaults for absent keys instead.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         language = try c.decodeIfPresent(String.self, forKey: .language)

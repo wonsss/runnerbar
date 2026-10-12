@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP="$ROOT/.build/RunnerBar.app"
-PLIST="$HOME/Library/LaunchAgents/local.runnerbar.plist"
+PLIST="$HOME/Library/LaunchAgents/io.github.wonsss.runnerbar.plist"
 
 if [ ! -x "$APP/Contents/MacOS/RunnerBar" ]; then
   "$ROOT/scripts/build-app.sh" >/dev/null
@@ -15,7 +15,7 @@ cat > "$PLIST" <<PLIST
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>local.runnerbar</string>
+  <string>io.github.wonsss.runnerbar</string>
   <key>ProgramArguments</key>
   <array>
     <string>$APP/Contents/MacOS/RunnerBar</string>

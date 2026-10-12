@@ -25,7 +25,7 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
   <key>CFBundleExecutable</key>
   <string>RunnerBar</string>
   <key>CFBundleIdentifier</key>
-  <string>local.runnerbar</string>
+  <string>io.github.wonsss.runnerbar</string>
   <key>CFBundleName</key>
   <string>RunnerBar</string>
   <key>CFBundleIconFile</key>

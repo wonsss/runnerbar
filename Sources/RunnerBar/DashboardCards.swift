@@ -9,7 +9,7 @@ struct WatchdogLogCard: View {
     private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "MM-dd HH:mm:ss"
-        f.timeZone = TimeZone(identifier: "Asia/Seoul")
+        f.timeZone = .current
         return f
     }()
 

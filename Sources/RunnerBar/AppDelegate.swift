@@ -922,8 +922,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let output = DateFormatter()
-        output.timeZone = TimeZone(identifier: "Asia/Seoul")
-        output.dateFormat = "MM-dd HH:mm:ss 'KST'"
+        output.timeZone = .current
+        output.dateFormat = "MM-dd HH:mm:ss zzz"
         return output.string(from: date)
     }
 

@@ -106,8 +106,9 @@ ENV
     echo "    already configured (.runner exists) — skipping config.sh"
   fi
 
-  # 등록된 러너의 실제 이름은 .runner의 agentName이 정본이다 — --name 기본값과
-  # 기존 등록이 어긋나도 서비스·config를 실제 이름으로 맞춘다. (BOM 주의)
+  # The registered runner's real name is .runner's agentName — even when the
+  # --name default or an existing registration disagree, align service and
+  # config to the actual name. (watch out for a BOM)
   ACTUAL_NAME="$(/usr/bin/python3 -c \
     'import json; print(json.load(open(".runner", encoding="utf-8-sig"))["agentName"])' \
     2>/dev/null || true)"
@@ -123,14 +124,15 @@ ENV
     else
       ./svc.sh install
     fi
-    # 로그인 항목 표시명은 ProgramArguments[0]의 파일명이다 — runsvc.sh 그대로면
-    # 러너가 전부 같은 이름으로 보이므로 <repo>-runner-<i>.sh 래퍼로 가리킨다.
+    # The login item's display name is the filename of ProgramArguments[0] —
+    # pointing at runsvc.sh would show every runner under the same name, so
+    # wrap it in a per-instance <repo>-runner-<i>.sh instead.
     SVC_WRAPPER="$DIR/${REPO_NAME}-runner-${i}.sh"
     printf '#!/bin/bash\nexec "$(dirname "$0")/runsvc.sh"\n' > "$SVC_WRAPPER"
     chmod +x "$SVC_WRAPPER"
-    # setup-python 계열의 toolcache는 러너가 잡마다 자기 기본값(hosted 이미지의
-    # /Users/runner/...)을 강제로 export하므로 .env/step env로 못 바꾼다 —
-    # 리스너 프로세스의 환경, 즉 LaunchAgent plist에 RUNNER_TOOL_CACHE를 박는다.
+    # The runner force-exports its own toolcache default for every job (the
+    # hosted image's /Users/runner/...), so .env/step env can't override it —
+    # bake RUNNER_TOOL_CACHE into the listener's environment via the plist.
     if [ -f "$PLIST" ]; then
       plutil -replace ProgramArguments.0 -string "$SVC_WRAPPER" "$PLIST"
       plutil -insert EnvironmentVariables.RUNNER_TOOL_CACHE -string "$HOME/actions-runners/_toolcache" "$PLIST" 2>/dev/null \
@@ -170,7 +172,7 @@ except FileNotFoundError:
 runners = [r for r in config.get("runners", []) if r.get("id") != repo]
 runners.append(entry)
 config["runners"] = runners
-# 앱의 필수 키 — 없으면 구버전 디코드가 실패해 설정 전체를 무시한다.
+# Required by the app — without it older decoders fail and ignore the config.
 config.setdefault("refreshIntervalSeconds", 20)
 import os
 os.makedirs(os.path.dirname(path), exist_ok=True)
