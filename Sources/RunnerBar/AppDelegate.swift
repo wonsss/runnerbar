@@ -283,6 +283,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refresh()
     }
 
+    private var dashboardScrollView: NSScrollView?
+
     @objc private func openDashboard() {
         if dashboardWindow == nil {
             let window = NSWindow(
@@ -294,6 +296,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.title = t("dashboardTitle")
             window.minSize = NSSize(width: 820, height: 520)
             window.center()
+
+            let scrollView = NSScrollView()
+            scrollView.hasVerticalScroller = true
+            scrollView.drawsBackground = false
+            window.contentView = scrollView
+            dashboardScrollView = scrollView
+
             dashboardWindow = window
         }
         rebuildDashboard()
@@ -640,10 +649,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func rebuildDashboard() {
-        guard let window = dashboardWindow else { return }
-        let scrollView = NSScrollView()
-        scrollView.hasVerticalScroller = true
-        scrollView.drawsBackground = false
+        guard let scrollView = dashboardScrollView else { return }
+        let clipView = scrollView.contentView
+        let savedY = clipView.bounds.origin.y
 
         let content = NSStackView()
         content.orientation = .vertical
@@ -652,33 +660,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         content.translatesAutoresizingMaskIntoConstraints = false
         content.alignment = .leading
 
-        content.addArrangedSubview(dashboardHeader())
-        content.addArrangedSubview(machineHealthHostView())
-        content.addArrangedSubview(watchdogHostView())
-        content.addArrangedSubview(labelGroupHostView())
-        content.addArrangedSubview(aiProviderCard())
-        content.addArrangedSubview(powerCard())
-
-        if snapshots.isEmpty {
-            content.addArrangedSubview(textLabel("No runners configured.", size: 14, color: .secondaryLabelColor))
-        } else {
-            for snapshot in snapshots {
-                content.addArrangedSubview(runnerCard(snapshot))
-            }
-        }
-
         let document = FlippedView()
         document.translatesAutoresizingMaskIntoConstraints = false
         document.addSubview(content)
         scrollView.documentView = document
-        window.contentView = scrollView
+
+        func addToColumn(_ view: NSView) {
+            content.addArrangedSubview(view)
+            view.translatesAutoresizingMaskIntoConstraints = false
+            view.widthAnchor.constraint(equalTo: clipView.widthAnchor, constant: -36).isActive = true
+        }
+
+        addToColumn(dashboardHeader())
+        addToColumn(machineHealthHostView())
+        addToColumn(watchdogHostView())
+        addToColumn(labelGroupHostView())
+        addToColumn(aiProviderCard())
+        addToColumn(powerCard())
+
+        if snapshots.isEmpty {
+            addToColumn(emptyRunnersCard())
+        } else {
+            for snapshot in snapshots {
+                addToColumn(runnerCard(snapshot))
+            }
+        }
 
         NSLayoutConstraint.activate([
-            document.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
+            document.widthAnchor.constraint(equalTo: clipView.widthAnchor),
             content.topAnchor.constraint(equalTo: document.topAnchor),
             content.leadingAnchor.constraint(equalTo: document.leadingAnchor),
             content.bottomAnchor.constraint(equalTo: document.bottomAnchor)
         ])
+
+        scrollView.layoutSubtreeIfNeeded()
+        document.layoutSubtreeIfNeeded()
+        let maxY = max(0, document.frame.height - clipView.bounds.height)
+        clipView.scroll(to: NSPoint(x: 0, y: min(savedY, maxY)))
+        scrollView.reflectScrolledClipView(clipView)
+    }
+
+    private func emptyRunnersCard() -> NSView {
+        let box = card()
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 6
+        stack.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        stack.addArrangedSubview(textLabel(t("noRunnersTitle"), size: 14, color: .labelColor, weight: .semibold))
+        stack.addArrangedSubview(textLabel(t("noRunnersHint"), size: 12, color: .secondaryLabelColor))
+        let register = NSButton(title: t("registerRunner"), target: self, action: #selector(registerRepositoryRunner))
+        register.bezelStyle = .rounded
+        stack.addArrangedSubview(register)
+
+        box.contentView?.addSubview(stack)
+        pin(stack, to: box.contentView)
+        return box
     }
 
     private func watchdogHostView() -> NSView {
@@ -689,7 +728,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         let host = NSHostingView(rootView: view)
         host.translatesAutoresizingMaskIntoConstraints = false
-        host.widthAnchor.constraint(equalToConstant: 920).isActive = true
         return host
     }
 
@@ -704,7 +742,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         let host = NSHostingView(rootView: view)
         host.translatesAutoresizingMaskIntoConstraints = false
-        host.widthAnchor.constraint(equalToConstant: 920).isActive = true
         return host
     }
 
@@ -726,7 +763,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let view = LabelGroupSummaryCard(language: config.appLanguage, groups: groups)
         let host = NSHostingView(rootView: view)
         host.translatesAutoresizingMaskIntoConstraints = false
-        host.widthAnchor.constraint(equalToConstant: 920).isActive = true
         return host
     }
 
@@ -745,7 +781,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stack.addArrangedSubview(summary)
         stack.addArrangedSubview(spacer())
         stack.addArrangedSubview(refreshButton)
-        stack.widthAnchor.constraint(equalToConstant: 920).isActive = true
         return stack
     }
 
@@ -753,6 +788,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let box = card()
         let stack = NSStackView()
         stack.orientation = .vertical
+        stack.alignment = .leading
         stack.spacing = 8
         stack.edgeInsets = NSEdgeInsets(top: 14, left: 14, bottom: 14, right: 14)
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -780,7 +816,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         box.contentView?.addSubview(stack)
         pin(stack, to: box.contentView)
-        box.widthAnchor.constraint(equalToConstant: 760).isActive = true
         return box
     }
 
@@ -788,6 +823,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let box = card()
         let stack = NSStackView()
         stack.orientation = .vertical
+        stack.alignment = .leading
         stack.spacing = 8
         stack.edgeInsets = NSEdgeInsets(top: 14, left: 14, bottom: 14, right: 14)
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -801,7 +837,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         box.contentView?.addSubview(stack)
         pin(stack, to: box.contentView)
-        box.widthAnchor.constraint(equalToConstant: 760).isActive = true
         return box
     }
 
@@ -809,6 +844,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let box = card()
         let stack = NSStackView()
         stack.orientation = .vertical
+        stack.alignment = .leading
         stack.spacing = 10
         stack.edgeInsets = NSEdgeInsets(top: 14, left: 14, bottom: 14, right: 14)
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -850,7 +886,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         box.contentView?.addSubview(stack)
         pin(stack, to: box.contentView)
-        box.widthAnchor.constraint(equalToConstant: 920).isActive = true
         return box
     }
 
@@ -916,7 +951,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         formatter.formatOptions = [.withInternetDateTime]
         guard let date = formatter.date(from: timestamp) else {
             return timestamp
-                .replacingOccurrences(of: "2026-", with: "")
+                .replacingOccurrences(of: #"^\d{4}-"#, with: "", options: .regularExpression)
                 .replacingOccurrences(of: "T", with: " ")
                 .replacingOccurrences(of: "Z", with: "")
         }
@@ -937,7 +972,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func card() -> NSBox {
         let box = NSBox()
         box.boxType = .custom
-        box.cornerRadius = 8
+        box.cornerRadius = 10
         box.borderColor = .separatorColor
         box.fillColor = .controlBackgroundColor
         return box

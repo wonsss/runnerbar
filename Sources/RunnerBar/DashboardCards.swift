@@ -18,7 +18,7 @@ struct WatchdogLogCard: View {
             HStack {
                 Text(Localization.t("watchdogTitle", language: language))
                     .font(.headline)
-                Text(enabled ? Localization.t("watchdogEnabled", language: language) : "disabled")
+                Text(enabled ? Localization.t("watchdogEnabled", language: language) : Localization.t("watchdogDisabled", language: language))
                     .font(.caption)
                     .foregroundColor(.secondary)
                 Spacer()
@@ -56,10 +56,10 @@ struct WatchdogLogCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(NSColor.controlBackgroundColor))
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: 10)
                 .stroke(Color(NSColor.separatorColor), lineWidth: 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
     private var statusColor: Color {
@@ -113,7 +113,7 @@ struct MachineHealthCard: View {
                     .frame(width: 10, height: 10)
             }
 
-            HStack(spacing: 18) {
+            HStack(alignment: .top, spacing: 24) {
                 diskRow
                 colimaRow
                 dockerRow
@@ -135,10 +135,10 @@ struct MachineHealthCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(NSColor.controlBackgroundColor))
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: 10)
                 .stroke(Color(NSColor.separatorColor), lineWidth: 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
     private var overallColor: Color {
@@ -164,7 +164,7 @@ struct MachineHealthCard: View {
             ProgressView(value: max(0, min(100, pct)) / 100.0)
                 .progressViewStyle(.linear)
                 .tint(isLow ? .red : .green)
-                .frame(width: 200)
+                .frame(maxWidth: 220)
         }
     }
 
@@ -264,10 +264,10 @@ struct LabelGroupSummaryCard: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color(NSColor.controlBackgroundColor))
             .overlay(
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: 10)
                     .stroke(Color(NSColor.separatorColor), lineWidth: 1)
             )
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
         }
     }
 }

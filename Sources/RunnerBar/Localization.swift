@@ -66,6 +66,7 @@ enum Localization {
         "watchdogRecoveryFailed": "복구 실패",
         "watchdogNoEvents": "최근 워치독 이벤트 없음",
         "watchdogEnabled": "워치독 활성",
+        "watchdogDisabled": "비활성",
         "watchdogSlackWebhook": "Slack Webhook URL",
         "watchdogSlackHelp": "지정하면 복구 실패 시 ops 알림이 전송됩니다.",
         // Replicas
@@ -95,7 +96,9 @@ enum Localization {
         "cleanupSupabase": "supabase stop",
         "cleanupSim": "사용 불가 시뮬레이터 삭제",
         "run": "실행",
-        "onRunner": "실행 러너"
+        "onRunner": "실행 러너",
+        "noRunnersTitle": "설정된 러너 없음",
+        "noRunnersHint": "메뉴바에서 GitHub 러너를 등록하면 여기에 표시됩니다."
     ]
 
     private static let en: [String: String] = [
@@ -158,6 +161,7 @@ enum Localization {
         "watchdogRecoveryFailed": "Recovery failed",
         "watchdogNoEvents": "No recent watchdog events",
         "watchdogEnabled": "Watchdog enabled",
+        "watchdogDisabled": "disabled",
         "watchdogSlackWebhook": "Slack webhook URL",
         "watchdogSlackHelp": "Optional. If set, RunnerBar posts a message when recovery fails.",
         // Replicas
@@ -187,6 +191,8 @@ enum Localization {
         "cleanupSupabase": "supabase stop",
         "cleanupSim": "Delete unavailable simulators",
         "run": "Run",
-        "onRunner": "on"
+        "onRunner": "on",
+        "noRunnersTitle": "No runners configured",
+        "noRunnersHint": "Register a GitHub runner from the menu bar and it will show up here."
     ]
 }
